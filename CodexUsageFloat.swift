@@ -71,7 +71,7 @@ final class UsageView: NSView {
             drawWindow(nil, in: CGRect(x: 18, y: 78, width: bounds.width - 36, height: 88), icon: .clock)
         } else {
             for (index, card) in cards.enumerated() {
-                let y = cards.count == 1 ? CGFloat(96) : CGFloat(78 + index * 102)
+                let y = CGFloat(78 + index * 102)
                 drawWindow(card.window, in: CGRect(x: 18, y: y, width: bounds.width - 36, height: 88), icon: card.icon)
             }
         }
@@ -101,11 +101,12 @@ final class UsageView: NSView {
     }
 
     private func drawHeader() {
-        drawTrafficLights()
+        let headerCenterY: CGFloat = 41
+        drawTrafficLights(centerY: headerCenterY)
 
         drawText(
             "Codex Usage",
-            rect: CGRect(x: 88, y: 24, width: bounds.width - 170, height: 34),
+            rect: CGRect(x: 88, y: headerCenterY - 17, width: bounds.width - 170, height: 34),
             size: 24,
             weight: .bold,
             color: NSColor(calibratedRed: 0.05, green: 0.08, blue: 0.25, alpha: 1)
@@ -113,7 +114,7 @@ final class UsageView: NSView {
 
         let plan = displayPlanName(snapshot.planType)
         let badgeWidth = max(CGFloat(54), textWidth(plan, size: 12, weight: .semibold) + 22)
-        let badgeRect = CGRect(x: bounds.width - badgeWidth - 26, y: 28, width: badgeWidth, height: 24)
+        let badgeRect = CGRect(x: bounds.width - badgeWidth - 26, y: headerCenterY - 12, width: badgeWidth, height: 24)
         let badge = NSBezierPath(roundedRect: badgeRect, xRadius: 8, yRadius: 8)
         NSGradient(colors: [
             NSColor(calibratedRed: 0.43, green: 0.53, blue: 0.98, alpha: 0.92),
@@ -152,14 +153,14 @@ final class UsageView: NSView {
         return ceil((text as NSString).size(withAttributes: attributes).width)
     }
 
-    private func drawTrafficLights() {
+    private func drawTrafficLights(centerY: CGFloat) {
         let colors = [
             NSColor(calibratedRed: 1.0, green: 0.37, blue: 0.34, alpha: 1),
             NSColor(calibratedRed: 1.0, green: 0.73, blue: 0.20, alpha: 1),
             NSColor(calibratedRed: 0.18, green: 0.82, blue: 0.32, alpha: 1)
         ]
         for (index, color) in colors.enumerated() {
-            let rect = CGRect(x: 18 + CGFloat(index) * 20, y: 24, width: 12, height: 12)
+            let rect = CGRect(x: 18 + CGFloat(index) * 20, y: centerY - 6, width: 12, height: 12)
             let dot = NSBezierPath(ovalIn: rect)
             color.setFill()
             dot.fill()
@@ -715,7 +716,7 @@ final class CodexUsageClient {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let windowWidth: CGFloat = 480
     private let fullWindowHeight: CGFloat = 332
-    private let compactWindowHeight: CGFloat = 236
+    private let compactWindowHeight: CGFloat = 218
     private let compactStatusItemWidthThreshold: CGFloat = 1700
     private var window: NSWindow!
     private var usageView: UsageView!
