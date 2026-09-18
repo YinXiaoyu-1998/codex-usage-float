@@ -27,10 +27,15 @@ struct UsageSnapshot {
 
 final class UsageView: NSView {
     var requestHide: (() -> Void)?
-    private let headerCenterY: CGFloat = 41
+    private let headerCenterY: CGFloat = 29
     private let trafficLightDiameter: CGFloat = 12
     private let trafficLightLeftX: CGFloat = 18
     private let trafficLightSpacing: CGFloat = 20
+    private let cardTopY: CGFloat = 58
+    private let cardHeight: CGFloat = 88
+    private let cardVerticalStep: CGFloat = 102
+    private let footerGap: CGFloat = 10
+    private let footerHeight: CGFloat = 30
 
     var snapshot = UsageSnapshot(
         fiveHour: nil,
@@ -79,15 +84,19 @@ final class UsageView: NSView {
         drawHeader()
 
         let cards = usageCards()
+        let footerY: CGFloat
         if cards.isEmpty {
-            drawWindow(nil, in: CGRect(x: 18, y: 78, width: bounds.width - 36, height: 88), icon: .clock)
+            let cardRect = CGRect(x: 18, y: cardTopY, width: bounds.width - 36, height: cardHeight)
+            drawWindow(nil, in: cardRect, icon: .clock)
+            footerY = cardRect.maxY + footerGap
         } else {
             for (index, card) in cards.enumerated() {
-                let y = CGFloat(78 + index * 102)
-                drawWindow(card.window, in: CGRect(x: 18, y: y, width: bounds.width - 36, height: 88), icon: card.icon)
+                let y = cardTopY + CGFloat(index) * cardVerticalStep
+                drawWindow(card.window, in: CGRect(x: 18, y: y, width: bounds.width - 36, height: cardHeight), icon: card.icon)
             }
+            footerY = cardTopY + CGFloat(cards.count - 1) * cardVerticalStep + cardHeight + footerGap
         }
-        drawFooter()
+        drawFooter(y: footerY)
     }
 
     private enum LimitIcon {
@@ -329,12 +338,29 @@ final class UsageView: NSView {
         }
     }
 
-    private func drawFooter() {
+    static func windowHeight(cardCount: Int) -> CGFloat {
+        let contentCardCount = max(1, cardCount)
+        let cardTopY: CGFloat = 58
+        let cardHeight: CGFloat = 88
+        let cardVerticalStep: CGFloat = 102
+        let footerGap: CGFloat = 10
+        let footerHeight: CGFloat = 30
+        let footerBottomPadding: CGFloat = 10
+
+        return cardTopY
+            + CGFloat(contentCardCount - 1) * cardVerticalStep
+            + cardHeight
+            + footerGap
+            + footerHeight
+            + footerBottomPadding
+    }
+
+    private func drawFooter(y footerY: CGFloat) {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
         let updated = formatter.string(from: snapshot.updatedAt)
         let credits = snapshot.resetCredits.map { "reset credits \($0)" } ?? "reset credits -"
-        let footerRect = CGRect(x: 18, y: bounds.height - 46, width: bounds.width - 36, height: 30)
+        let footerRect = CGRect(x: 18, y: footerY, width: bounds.width - 36, height: footerHeight)
         let footerPath = NSBezierPath(roundedRect: footerRect, xRadius: 10, yRadius: 10)
         NSColor(calibratedRed: 0.76, green: 0.82, blue: 1.0, alpha: 0.32).setFill()
         footerPath.fill()
@@ -342,9 +368,10 @@ final class UsageView: NSView {
         footerPath.lineWidth = 1
         footerPath.stroke()
 
+        let footerTextY = footerRect.minY + (footerRect.height - 14) / 2
         drawText(
             credits,
-            rect: CGRect(x: footerRect.minX + 24, y: footerRect.minY + 7, width: 142, height: 14),
+            rect: CGRect(x: footerRect.minX + 24, y: footerTextY, width: 142, height: 14),
             size: 12,
             weight: .medium,
             color: NSColor(calibratedRed: 0.18, green: 0.22, blue: 0.62, alpha: 1)
@@ -352,7 +379,7 @@ final class UsageView: NSView {
 
         drawText(
             "•  updated \(updated)",
-            rect: CGRect(x: footerRect.minX + 178, y: footerRect.minY + 7, width: footerRect.width - 196, height: 14),
+            rect: CGRect(x: footerRect.minX + 178, y: footerTextY, width: footerRect.width - 196, height: 14),
             size: 12,
             weight: .medium,
             color: NSColor(calibratedRed: 0.18, green: 0.22, blue: 0.62, alpha: 1)
@@ -738,8 +765,8 @@ final class CodexUsageClient {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let windowWidth: CGFloat = 480
-    private let fullWindowHeight: CGFloat = 332
-    private let compactWindowHeight: CGFloat = 222
+    private let fullWindowHeight = UsageView.windowHeight(cardCount: 2)
+    private let compactWindowHeight = UsageView.windowHeight(cardCount: 1)
     private let compactStatusItemWidthThreshold: CGFloat = 1700
     private var window: NSWindow!
     private var usageView: UsageView!
