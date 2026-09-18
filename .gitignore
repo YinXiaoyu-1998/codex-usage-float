@@ -1,0 +1,20 @@
+# Build products
+CodexUsageFloat
+CodexUsageFloat.app/
+
+# Runtime logs
+*.log
+launchagent.out.log
+launchagent.err.log
+
+# Local screenshots and QA captures
+screenshot-*.png
+*.mov
+
+# macOS metadata
+.DS_Store
+
+# Swift/Xcode local state
+.build/
+DerivedData/
+*.xcuserdata/
