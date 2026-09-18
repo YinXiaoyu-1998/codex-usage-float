@@ -7,7 +7,7 @@ APP_CONTENTS="$ROOT/CodexUsageFloat.app/Contents"
 APP_BIN="$ROOT/CodexUsageFloat.app/Contents/MacOS/CodexUsageFloat"
 APP_RESOURCES="$ROOT/CodexUsageFloat.app/Contents/Resources"
 
-swiftc -framework Cocoa "$ROOT/CodexUsageFloat.swift" -o "$BIN"
+swiftc -framework Cocoa -framework UserNotifications "$ROOT/CodexUsageFloat.swift" -o "$BIN"
 mkdir -p "$ROOT/CodexUsageFloat.app/Contents/MacOS"
 mkdir -p "$APP_RESOURCES"
 cp "$BIN" "$APP_BIN"

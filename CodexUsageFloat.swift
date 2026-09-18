@@ -1,4 +1,5 @@
 import Cocoa
+import UserNotifications
 
 struct LimitWindow {
     let title: String
@@ -58,6 +59,13 @@ final class UsageView: NSView {
             return
         }
         super.mouseDown(with: event)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        for index in 0..<2 {
+            addCursorRect(trafficLightRect(index: index).insetBy(dx: -4, dy: -4), cursor: .pointingHand)
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -168,8 +176,7 @@ final class UsageView: NSView {
     private func drawTrafficLights() {
         let colors = [
             NSColor(calibratedRed: 1.0, green: 0.37, blue: 0.34, alpha: 1),
-            NSColor(calibratedRed: 1.0, green: 0.73, blue: 0.20, alpha: 1),
-            NSColor(calibratedRed: 0.18, green: 0.82, blue: 0.32, alpha: 1)
+            NSColor(calibratedRed: 1.0, green: 0.73, blue: 0.20, alpha: 1)
         ]
         for (index, color) in colors.enumerated() {
             let rect = trafficLightRect(index: index)
@@ -732,7 +739,7 @@ final class CodexUsageClient {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let windowWidth: CGFloat = 480
     private let fullWindowHeight: CGFloat = 332
-    private let compactWindowHeight: CGFloat = 218
+    private let compactWindowHeight: CGFloat = 222
     private let compactStatusItemWidthThreshold: CGFloat = 1700
     private var window: NSWindow!
     private var usageView: UsageView!
@@ -740,6 +747,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var timer: Timer?
     private var statusItem: NSStatusItem!
     private var latestSnapshot: UsageSnapshot?
+    private var notificationPermissionGranted = false
     private let statusIcon: NSImage? = {
         let candidates: [URL?] = [
             Bundle.main.url(forResource: "openai-codex-seeklogo", withExtension: "svg"),
@@ -801,6 +809,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         window.makeKeyAndOrderFront(nil)
         setupStatusItem()
+        setupNotifications()
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screenParametersDidChange),
@@ -809,7 +818,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         client = CodexUsageClient { [weak self] snapshot in
+            let previousSnapshot = self?.latestSnapshot
             self?.usageView.snapshot = snapshot
+            self?.notifyForRefreshedLimits(previous: previousSnapshot, current: snapshot)
             self?.latestSnapshot = snapshot
             self?.updateStatusItem(snapshot)
             self?.resizeWindow(for: snapshot)
@@ -835,6 +846,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.imageScaling = .scaleProportionallyDown
         }
         applyStatusItem(snapshot: nil)
+    }
+
+    private func setupNotifications() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
+            DispatchQueue.main.async {
+                self?.notificationPermissionGranted = granted
+            }
+        }
+    }
+
+    private func notifyForRefreshedLimits(previous: UsageSnapshot?, current: UsageSnapshot) {
+        guard let previous else { return }
+
+        var refreshed: [(label: String, remaining: Int)] = []
+        if didRefresh(previous: previous.fiveHour, current: current.fiveHour) {
+            refreshed.append(("5H", current.fiveHour?.remainingPercent ?? 100))
+        }
+        if didRefresh(previous: previous.weekly, current: current.weekly) {
+            refreshed.append(("Weekly", current.weekly?.remainingPercent ?? 100))
+        }
+        guard !refreshed.isEmpty else { return }
+
+        let summary = refreshed
+            .map { "\($0.label) is back to \($0.remaining)% left" }
+            .joined(separator: ", ")
+        deliverUsageRefreshNotification(body: summary)
+    }
+
+    private func didRefresh(previous: LimitWindow?, current: LimitWindow?) -> Bool {
+        guard let previous, let current else { return false }
+        return previous.remainingPercent <= 96 && current.remainingPercent >= 99
+    }
+
+    private func deliverUsageRefreshNotification(body: String) {
+        guard notificationPermissionGranted else {
+            NSSound.beep()
+            return
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Codex Usage Refreshed"
+        content.body = body
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "codex-usage-refreshed-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if error != nil {
+                DispatchQueue.main.async {
+                    NSSound.beep()
+                }
+            }
+        }
     }
 
     private func updateStatusItem(_ snapshot: UsageSnapshot) {
@@ -983,6 +1052,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         NSApp.terminate(nil)
+    }
+}
+
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
     }
 }
 
