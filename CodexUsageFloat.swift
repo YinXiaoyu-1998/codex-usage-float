@@ -27,16 +27,6 @@ struct UsageSnapshot {
 final class UsageView: NSView {
     var requestHide: (() -> Void)?
 
-    private let logoImage: NSImage? = {
-        if let url = Bundle.main.url(forResource: "codex_logo", withExtension: "svg") {
-            return NSImage(contentsOf: url)
-        }
-        if let url = Bundle.main.url(forResource: "codex-logo", withExtension: "png") {
-            return NSImage(contentsOf: url)
-        }
-        return nil
-    }()
-
     var snapshot = UsageSnapshot(
         fiveHour: nil,
         weekly: nil,
@@ -112,11 +102,10 @@ final class UsageView: NSView {
 
     private func drawHeader() {
         drawTrafficLights()
-        drawCodexBadge(in: CGRect(x: 78, y: 22, width: 46, height: 46))
 
         drawText(
             "Codex Usage",
-            rect: CGRect(x: 138, y: 24, width: bounds.width - 220, height: 34),
+            rect: CGRect(x: 88, y: 24, width: bounds.width - 170, height: 34),
             size: 24,
             weight: .bold,
             color: NSColor(calibratedRed: 0.05, green: 0.08, blue: 0.25, alpha: 1)
@@ -138,18 +127,6 @@ final class UsageView: NSView {
             color: .white,
             alignment: .center
         )
-    }
-
-    private func drawCodexBadge(in rect: CGRect) {
-        if let logoImage {
-            logoImage.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
-        } else {
-            let badge = NSBezierPath(roundedRect: rect, xRadius: 13, yRadius: 13)
-            NSGradient(colors: [
-                NSColor(calibratedRed: 0.92, green: 0.95, blue: 1.0, alpha: 0.88),
-                NSColor(calibratedRed: 0.63, green: 0.70, blue: 1.0, alpha: 0.72)
-            ])?.draw(in: badge, angle: -45)
-        }
     }
 
     private func displayPlanName(_ rawPlanType: String?) -> String {
@@ -342,17 +319,8 @@ final class UsageView: NSView {
         footerPath.stroke()
 
         drawText(
-            "↻",
-            rect: CGRect(x: footerRect.minX + 16, y: footerRect.minY + 3, width: 22, height: 20),
-            size: 21,
-            weight: .regular,
-            color: NSColor(calibratedRed: 0.22, green: 0.32, blue: 0.92, alpha: 1),
-            alignment: .center
-        )
-
-        drawText(
             credits,
-            rect: CGRect(x: footerRect.minX + 48, y: footerRect.minY + 7, width: 118, height: 14),
+            rect: CGRect(x: footerRect.minX + 24, y: footerRect.minY + 7, width: 142, height: 14),
             size: 12,
             weight: .medium,
             color: NSColor(calibratedRed: 0.18, green: 0.22, blue: 0.62, alpha: 1)
