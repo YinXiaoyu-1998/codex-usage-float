@@ -26,6 +26,10 @@ struct UsageSnapshot {
 
 final class UsageView: NSView {
     var requestHide: (() -> Void)?
+    private let headerCenterY: CGFloat = 41
+    private let trafficLightDiameter: CGFloat = 12
+    private let trafficLightLeftX: CGFloat = 18
+    private let trafficLightSpacing: CGFloat = 20
 
     var snapshot = UsageSnapshot(
         fiveHour: nil,
@@ -42,8 +46,8 @@ final class UsageView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        let closeRect = CGRect(x: 16, y: 22, width: 16, height: 16)
-        let minimizeRect = CGRect(x: 36, y: 22, width: 16, height: 16)
+        let closeRect = trafficLightRect(index: 0).insetBy(dx: -4, dy: -4)
+        let minimizeRect = trafficLightRect(index: 1).insetBy(dx: -4, dy: -4)
 
         if closeRect.contains(point) {
             NSApp.terminate(nil)
@@ -101,8 +105,7 @@ final class UsageView: NSView {
     }
 
     private func drawHeader() {
-        let headerCenterY: CGFloat = 41
-        drawTrafficLights(centerY: headerCenterY)
+        drawTrafficLights()
 
         drawText(
             "Codex Usage",
@@ -153,14 +156,23 @@ final class UsageView: NSView {
         return ceil((text as NSString).size(withAttributes: attributes).width)
     }
 
-    private func drawTrafficLights(centerY: CGFloat) {
+    private func trafficLightRect(index: Int) -> CGRect {
+        CGRect(
+            x: trafficLightLeftX + CGFloat(index) * trafficLightSpacing,
+            y: headerCenterY - trafficLightDiameter / 2,
+            width: trafficLightDiameter,
+            height: trafficLightDiameter
+        )
+    }
+
+    private func drawTrafficLights() {
         let colors = [
             NSColor(calibratedRed: 1.0, green: 0.37, blue: 0.34, alpha: 1),
             NSColor(calibratedRed: 1.0, green: 0.73, blue: 0.20, alpha: 1),
             NSColor(calibratedRed: 0.18, green: 0.82, blue: 0.32, alpha: 1)
         ]
         for (index, color) in colors.enumerated() {
-            let rect = CGRect(x: 18 + CGFloat(index) * 20, y: centerY - 6, width: 12, height: 12)
+            let rect = trafficLightRect(index: index)
             let dot = NSBezierPath(ovalIn: rect)
             color.setFill()
             dot.fill()
@@ -181,7 +193,7 @@ final class UsageView: NSView {
         panel.lineWidth = 1
         panel.stroke()
 
-        drawIcon(icon, in: CGRect(x: rect.minX + 16, y: rect.minY + 22, width: 42, height: 42))
+        drawIcon(icon, in: CGRect(x: rect.minX + 16, y: rect.minY + 14, width: 42, height: 42))
 
         guard let limit else {
             drawText(
@@ -200,7 +212,7 @@ final class UsageView: NSView {
         let title = limit.title
         drawText(
             title,
-            rect: CGRect(x: rect.minX + 74, y: rect.minY + 21, width: titleWidth, height: 30),
+            rect: CGRect(x: rect.minX + 74, y: rect.minY + 16, width: titleWidth, height: 30),
             size: 26,
             weight: .bold,
             color: .white
@@ -208,7 +220,7 @@ final class UsageView: NSView {
 
         drawText(
             "\(limit.remainingPercent)% left",
-            rect: CGRect(x: percentX, y: rect.minY + 23, width: 130, height: 30),
+            rect: CGRect(x: percentX, y: rect.minY + 18, width: 130, height: 30),
             size: 25,
             weight: .bold,
             color: NSColor(calibratedRed: 0.43, green: 0.82, blue: 1.0, alpha: 1)
@@ -216,22 +228,26 @@ final class UsageView: NSView {
 
         drawText(
             "used \(limit.usedPercent)%",
-            rect: CGRect(x: rect.maxX - 86, y: rect.minY + 26, width: 68, height: 18),
+            rect: CGRect(x: rect.maxX - 86, y: rect.minY + 21, width: 68, height: 18),
             size: 13,
             weight: .medium,
             color: NSColor(calibratedRed: 0.73, green: 0.76, blue: 0.98, alpha: 1),
             alignment: .right
         )
 
+        let resetRect = CGRect(x: rect.minX + 74, y: rect.minY + 47, width: rect.width - 92, height: 14)
         drawText(
             resetText(for: limit),
-            rect: CGRect(x: rect.minX + 74, y: rect.minY + 55, width: rect.width - 92, height: 14),
+            rect: resetRect,
             size: 13,
             weight: .medium,
             color: NSColor(calibratedRed: 0.72, green: 0.76, blue: 0.98, alpha: 0.95)
         )
 
-        drawSegmentBar(percent: limit.remainingPercent, rect: CGRect(x: rect.minX + 16, y: rect.maxY - 18, width: rect.width - 32, height: 10))
+        drawSegmentBar(
+            percent: limit.remainingPercent,
+            rect: CGRect(x: rect.minX + 16, y: resetRect.maxY + 10, width: rect.width - 32, height: 10)
+        )
     }
 
     private func drawIcon(_ icon: LimitIcon, in rect: CGRect) {
