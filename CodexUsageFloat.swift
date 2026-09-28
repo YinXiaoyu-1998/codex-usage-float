@@ -446,13 +446,7 @@ final class CodexUsageClient {
         guard process == nil else { return }
 
         let process = Process()
-        if FileManager.default.fileExists(atPath: "/Applications/ChatGPT.app/Contents/Resources/codex") {
-            process.executableURL = URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex")
-            process.arguments = ["app-server", "--stdio"]
-        } else {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["codex", "app-server", "--stdio"]
-        }
+        configureCodexProcess(process)
 
         let input = Pipe()
         let output = Pipe()
@@ -482,6 +476,27 @@ final class CodexUsageClient {
             publishError("Cannot start codex app-server")
             scheduleRestart()
         }
+    }
+
+    private func configureCodexProcess(_ process: Process) {
+        let codexPaths = [
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+            "/Applications/ChatGPT.app/Contents/Resources/codex",
+            "/opt/homebrew/bin/codex",
+            "/usr/local/bin/codex"
+        ]
+
+        if let codexPath = codexPaths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) {
+            process.executableURL = URL(fileURLWithPath: codexPath)
+            process.arguments = ["app-server", "--stdio"]
+            return
+        }
+
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["codex", "app-server", "--stdio"]
+        var environment = ProcessInfo.processInfo.environment
+        environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        process.environment = environment
     }
 
     func stop() {
