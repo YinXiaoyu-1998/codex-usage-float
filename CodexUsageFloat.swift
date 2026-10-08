@@ -61,10 +61,21 @@ final class FlowProgressView: NSView {
     private let shimmerLayer = CAGradientLayer()
     private let waveLayer = CAShapeLayer()
     private let accentLayer = CAShapeLayer()
+    private let handleLayer = CAShapeLayer()
     private var displayOptionsObserver: NSObjectProtocol?
     private var visibilityObserver: NSObjectProtocol?
     private var fillSize = CGSize.zero
     private var previousMood: Mood?
+    private var previewPercent: CGFloat?
+    private var isDragging = false
+    private var dragStartX: CGFloat = 0
+    private var dragStartPercent: CGFloat = 0
+    private var returnTimer: Timer?
+    private var dragCursorPushed = false
+
+    var displayedPercent: CGFloat {
+        previewPercent ?? CGFloat(max(0, min(100, percent)))
+    }
 
     var percent = 0 {
         didSet {
@@ -97,16 +108,26 @@ final class FlowProgressView: NSView {
         waveLayer.fillColor = NSColor.white.withAlphaComponent(0.15).cgColor
         fillLayer.addSublayer(waveLayer)
         fillLayer.addSublayer(accentLayer)
+        handleLayer.fillColor = NSColor.white.withAlphaComponent(0.70).cgColor
+        layer?.addSublayer(handleLayer)
+        toolTip = "Drag the handle to preview quota colors. Release to restore live usage."
 
         displayOptionsObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil, queue: .main
-        ) { [weak self] _ in self?.updateAnimations() }
+        ) { [weak self] _ in
+            guard let self else { return }
+            if self.returnTimer != nil && NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                self.restoreActualPercent(animated: false)
+            }
+            self.updateAnimations()
+        }
         visibilityObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didChangeOcclusionStateNotification,
             object: nil, queue: .main
         ) { [weak self] notification in
             guard let self, let window = notification.object as? NSWindow, window === self.window else { return }
+            if !window.occlusionState.contains(.visible) { self.restoreActualPercent(animated: false) }
             self.updateAnimations()
         }
     }
@@ -114,22 +135,118 @@ final class FlowProgressView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     deinit {
+        returnTimer?.invalidate()
+        if dragCursorPushed { NSCursor.pop() }
         if let displayOptionsObserver { NSWorkspace.shared.notificationCenter.removeObserver(displayOptionsObserver) }
         if let visibilityObserver { NotificationCenter.default.removeObserver(visibilityObserver) }
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    private var handleCenterX: CGFloat {
+        max(8, min(bounds.width - 8, bounds.width * displayedPercent / 100 - 8))
+    }
+
+    private var handleRect: CGRect {
+        CGRect(x: handleCenterX - 12, y: 0, width: 24, height: bounds.height).intersection(bounds)
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var acceptsFirstResponder: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHiddenOrHasHiddenAncestor else { return nil }
+        return handleRect.contains(convert(point, from: superview)) ? self : nil
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(handleRect, cursor: .pointingHand)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard handleRect.contains(point) else { return }
+        returnTimer?.invalidate()
+        returnTimer = nil
+        dragStartPercent = displayedPercent
+        previewPercent = dragStartPercent
+        dragStartX = point.x
+        isDragging = true
+        window?.makeFirstResponder(self)
+        if !dragCursorPushed {
+            NSCursor.closedHand.push()
+            dragCursorPushed = true
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isDragging, bounds.width > 0 else { return }
+        let x = convert(event.locationInWindow, from: nil).x
+        previewPercent = max(0, min(100, dragStartPercent + (x - dragStartX) / bounds.width * 100))
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isDragging else { return }
+        restoreActualPercent(animated: true)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        restoreActualPercent(animated: true)
+    }
+
+    private func restoreActualPercent(animated: Bool) {
+        returnTimer?.invalidate()
+        returnTimer = nil
+        isDragging = false
+        if dragCursorPushed {
+            NSCursor.pop()
+            dragCursorPushed = false
+        }
+        guard let startPercent = previewPercent else { return }
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              window?.occlusionState.contains(.visible) == true else {
+            previewPercent = nil
+            needsLayout = true
+            layoutSubtreeIfNeeded()
+            return
+        }
+
+        let startedAt = CACurrentMediaTime()
+        // The timer exists only during the short return; ambient motion stays on Core Animation.
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
+            guard let self else { timer.invalidate(); return }
+            let progress = min(1, (CACurrentMediaTime() - startedAt) / 0.32)
+            let eased = CGFloat(1 - pow(1 - progress, 3))
+            let target = CGFloat(max(0, min(100, self.percent)))
+            self.previewPercent = progress >= 1 ? nil : startPercent + (target - startPercent) * eased
+            self.needsLayout = true
+            self.layoutSubtreeIfNeeded()
+            if progress >= 1 {
+                timer.invalidate()
+                self.returnTimer = nil
+            }
+        }
+        returnTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window == nil { restoreActualPercent(animated: false) }
         updateAnimations()
     }
 
     override func layout() {
         super.layout()
-        let size = CGSize(width: bounds.width * CGFloat(max(0, min(100, percent))) / 100, height: bounds.height)
-        let mood = Mood.forPercent(percent)
-        if fillSize != size || previousMood != mood { stopAnimations() }
+        let size = CGSize(width: bounds.width * displayedPercent / 100, height: bounds.height)
+        let mood = Mood.forPercent(Int(displayedPercent))
+        if previousMood != mood {
+            stopAnimations()
+        } else if fillSize != size {
+            shimmerLayer.removeAllAnimations()
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer?.cornerRadius = bounds.height / 2
@@ -169,9 +286,15 @@ final class FlowProgressView: NSView {
             accents.addEllipse(in: CGRect(x: size.width * 0.65 - 9, y: size.height * 0.48 - 9, width: 18, height: 18))
         }
         accentLayer.path = accents
+        let grip = CGMutablePath()
+        for offset in [CGFloat(-2.5), 2.5] {
+            grip.addRoundedRect(in: CGRect(x: handleCenterX + offset - 0.9, y: bounds.midY - 6, width: 1.8, height: 12), cornerWidth: 0.9, cornerHeight: 0.9)
+        }
+        handleLayer.path = grip
         CATransaction.commit()
         fillSize = size
         previousMood = mood
+        window?.invalidateCursorRects(for: self)
         updateAnimations()
     }
 
@@ -189,7 +312,7 @@ final class FlowProgressView: NSView {
             stopAnimations()
             return
         }
-        let mood = Mood.forPercent(percent)
+        let mood = Mood.forPercent(Int(displayedPercent))
         if mood == .danger {
             if layer?.animation(forKey: "danger") == nil, let layer {
                 addBreathing(to: layer, key: "danger", keyPath: "opacity", from: 0.50, to: 1, duration: 0.85)
