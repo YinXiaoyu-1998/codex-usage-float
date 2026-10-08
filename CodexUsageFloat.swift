@@ -27,12 +27,44 @@ struct UsageSnapshot {
 }
 
 final class FlowProgressView: NSView {
+    private enum Mood {
+        case meadow, water, sunset, danger
+
+        static func forPercent(_ percent: Int) -> Mood {
+            switch percent {
+            case 70...: return .meadow
+            case 40..<70: return .water
+            case 10..<40: return .sunset
+            default: return .danger
+            }
+        }
+
+        var colors: [NSColor] {
+            switch self {
+            case .meadow:
+                return [NSColor(calibratedRed: 0.12, green: 0.60, blue: 0.29, alpha: 1),
+                        NSColor(calibratedRed: 0.48, green: 0.88, blue: 0.49, alpha: 1)]
+            case .water:
+                return [NSColor(calibratedRed: 0.02, green: 0.65, blue: 0.98, alpha: 1),
+                        NSColor(calibratedRed: 0.05, green: 0.83, blue: 0.98, alpha: 1)]
+            case .sunset:
+                return [NSColor(calibratedRed: 0.97, green: 0.61, blue: 0.12, alpha: 1),
+                        NSColor(calibratedRed: 1, green: 0.86, blue: 0.35, alpha: 1)]
+            case .danger:
+                return [NSColor(calibratedRed: 0.85, green: 0.13, blue: 0.20, alpha: 1),
+                        NSColor(calibratedRed: 1, green: 0.39, blue: 0.33, alpha: 1)]
+            }
+        }
+    }
+
     private let fillLayer = CAGradientLayer()
     private let shimmerLayer = CAGradientLayer()
     private let waveLayer = CAShapeLayer()
+    private let accentLayer = CAShapeLayer()
     private var displayOptionsObserver: NSObjectProtocol?
     private var visibilityObserver: NSObjectProtocol?
     private var fillSize = CGSize.zero
+    private var previousMood: Mood?
 
     var percent = 0 {
         didSet {
@@ -64,6 +96,7 @@ final class FlowProgressView: NSView {
         fillLayer.addSublayer(shimmerLayer)
         waveLayer.fillColor = NSColor.white.withAlphaComponent(0.15).cgColor
         fillLayer.addSublayer(waveLayer)
+        fillLayer.addSublayer(accentLayer)
 
         displayOptionsObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
@@ -95,9 +128,13 @@ final class FlowProgressView: NSView {
     override func layout() {
         super.layout()
         let size = CGSize(width: bounds.width * CGFloat(max(0, min(100, percent))) / 100, height: bounds.height)
+        let mood = Mood.forPercent(percent)
+        if fillSize != size || previousMood != mood { stopAnimations() }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         layer?.cornerRadius = bounds.height / 2
+        layer?.backgroundColor = mood.colors[0].blended(withFraction: 0.80, of: .black)?.cgColor
+        fillLayer.colors = mood.colors.map { $0.cgColor }
         fillLayer.frame = CGRect(origin: .zero, size: size)
         fillLayer.cornerRadius = bounds.height / 2
         shimmerLayer.frame = CGRect(x: 0, y: 0, width: size.width * 2, height: size.height)
@@ -107,33 +144,82 @@ final class FlowProgressView: NSView {
         wave.move(to: CGPoint(x: 0, y: 0))
         let waveWidth = size.width + 96
         for x in stride(from: CGFloat(0), through: ceil(waveWidth), by: 2) {
-            wave.addLine(to: CGPoint(x: x, y: size.height * 0.48 + sin(x * .pi * 2 / 96) * 2))
+            let amplitude: CGFloat = mood == .sunset ? 0 : 2
+            wave.addLine(to: CGPoint(x: x, y: size.height * 0.48 + sin(x * .pi * 2 / 96) * amplitude))
         }
         wave.addLine(to: CGPoint(x: waveWidth, y: 0))
         wave.closeSubpath()
         waveLayer.path = wave
-        CATransaction.commit()
-        if fillSize != size {
-            shimmerLayer.removeAllAnimations()
-            fillSize = size
+        waveLayer.isHidden = mood == .danger
+        shimmerLayer.isHidden = mood == .danger
+        accentLayer.frame = CGRect(origin: .zero, size: size)
+        accentLayer.isHidden = mood == .water || mood == .danger
+        accentLayer.fillColor = NSColor(calibratedRed: 1, green: 0.97, blue: 0.75, alpha: 0.45).cgColor
+        let accents = CGMutablePath()
+        if mood == .meadow {
+            for fraction in [CGFloat(0.22), 0.55, 0.82] {
+                let x = size.width * fraction
+                let y = size.height * 0.50
+                accents.move(to: CGPoint(x: x - 5, y: y - 2))
+                accents.addQuadCurve(to: CGPoint(x: x + 5, y: y + 2), control: CGPoint(x: x + 3, y: y - 7))
+                accents.addQuadCurve(to: CGPoint(x: x - 5, y: y - 2), control: CGPoint(x: x - 3, y: y + 7))
+                accents.closeSubpath()
+            }
+        } else if mood == .sunset {
+            accents.addEllipse(in: CGRect(x: size.width * 0.65 - 9, y: size.height * 0.48 - 9, width: 18, height: 18))
         }
+        accentLayer.path = accents
+        CATransaction.commit()
+        fillSize = size
+        previousMood = mood
         updateAnimations()
+    }
+
+    private func stopAnimations() {
+        layer?.removeAnimation(forKey: "danger")
+        shimmerLayer.removeAllAnimations()
+        waveLayer.removeAllAnimations()
+        accentLayer.removeAllAnimations()
     }
 
     private func updateAnimations() {
         let visible = window?.occlusionState.contains(.visible) == true && !isHiddenOrHasHiddenAncestor
-        guard visible, percent > 0, fillSize.width > 0,
+        guard visible,
               !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
-            shimmerLayer.removeAllAnimations()
-            waveLayer.removeAllAnimations()
+            stopAnimations()
             return
         }
+        let mood = Mood.forPercent(percent)
+        if mood == .danger {
+            if layer?.animation(forKey: "danger") == nil, let layer {
+                addBreathing(to: layer, key: "danger", keyPath: "opacity", from: 0.50, to: 1, duration: 0.85)
+            }
+            return
+        }
+        guard fillSize.width > 0 else { return }
         if shimmerLayer.animation(forKey: "flow") == nil {
-            addFlow(to: shimmerLayer, distance: fillSize.width, duration: 3.6)
+            let duration: TimeInterval = mood == .water ? 3.6 : 9
+            addFlow(to: shimmerLayer, distance: fillSize.width, duration: duration)
         }
-        if waveLayer.animation(forKey: "flow") == nil {
-            addFlow(to: waveLayer, distance: 96, duration: 4.8)
+        if mood != .sunset, waveLayer.animation(forKey: "flow") == nil {
+            addFlow(to: waveLayer, distance: 96, duration: mood == .water ? 4.8 : 8)
         }
+        if mood == .meadow, accentLayer.animation(forKey: "sway") == nil {
+            addBreathing(to: accentLayer, key: "sway", keyPath: "transform.translation.y", from: -2, to: 2, duration: 2.8)
+        } else if mood == .sunset, accentLayer.animation(forKey: "glow") == nil {
+            addBreathing(to: accentLayer, key: "glow", keyPath: "opacity", from: 0.35, to: 1, duration: 3.5)
+        }
+    }
+
+    private func addBreathing(to layer: CALayer, key: String, keyPath: String, from: CGFloat, to: CGFloat, duration: TimeInterval) {
+        let animation = CABasicAnimation(keyPath: keyPath)
+        animation.fromValue = from
+        animation.toValue = to
+        animation.duration = duration
+        animation.autoreverses = true
+        animation.repeatCount = .infinity
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(animation, forKey: key)
     }
 
     private func addFlow(to layer: CALayer, distance: CGFloat, duration: TimeInterval) {
@@ -154,8 +240,8 @@ final class UsageView: NSView {
     private let trafficLightLeftX: CGFloat = 18
     private let trafficLightSpacing: CGFloat = 20
     private let cardTopY: CGFloat = 58
-    private let cardHeight: CGFloat = 94
-    private let cardVerticalStep: CGFloat = 108
+    private let cardHeight: CGFloat = 103.6
+    private let cardVerticalStep: CGFloat = 117.6
     private let footerGap: CGFloat = 10
     private let footerHeight: CGFloat = 30
     private var progressViews: [FlowProgressView] = []
@@ -191,7 +277,7 @@ final class UsageView: NSView {
             let progress = progressViews[index]
             progress.frame = CGRect(
                 x: 34, y: cardTopY + CGFloat(index) * cardVerticalStep + 71,
-                width: bounds.width - 68, height: 16
+                width: bounds.width - 68, height: 25.6
             )
             progress.percent = card.window.remainingPercent
         }
@@ -458,8 +544,8 @@ final class UsageView: NSView {
     static func windowHeight(cardCount: Int) -> CGFloat {
         let contentCardCount = max(1, cardCount)
         let cardTopY: CGFloat = 58
-        let cardHeight: CGFloat = 94
-        let cardVerticalStep: CGFloat = 108
+        let cardHeight: CGFloat = 103.6
+        let cardVerticalStep: CGFloat = 117.6
         let footerGap: CGFloat = 10
         let footerHeight: CGFloat = 30
         let footerBottomPadding: CGFloat = 10
