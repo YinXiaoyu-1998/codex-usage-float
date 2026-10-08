@@ -40,6 +40,7 @@ This installs `~/Library/LaunchAgents/local.codex.usagefloat.plist`. The LaunchA
 
 ## UI Behavior
 
+- Usage bars are continuous, with a gentle flowing highlight that stops when the window is hidden or macOS Reduce Motion is enabled.
 - Click the red dot to quit.
 - Click the yellow dot to hide the floating window.
 - Click the menu bar item to show or hide the floating window.

@@ -1,4 +1,5 @@
 import Cocoa
+import QuartzCore
 import UserNotifications
 
 struct LimitWindow {
@@ -25,6 +26,127 @@ struct UsageSnapshot {
     }
 }
 
+final class FlowProgressView: NSView {
+    private let fillLayer = CAGradientLayer()
+    private let shimmerLayer = CAGradientLayer()
+    private let waveLayer = CAShapeLayer()
+    private var displayOptionsObserver: NSObjectProtocol?
+    private var visibilityObserver: NSObjectProtocol?
+    private var fillSize = CGSize.zero
+
+    var percent = 0 {
+        didSet {
+            if oldValue != percent { needsLayout = true }
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor(calibratedRed: 0.16, green: 0.21, blue: 0.38, alpha: 1).cgColor
+        layer?.masksToBounds = true
+
+        fillLayer.colors = [
+            NSColor(calibratedRed: 0.02, green: 0.65, blue: 0.98, alpha: 1).cgColor,
+            NSColor(calibratedRed: 0.05, green: 0.83, blue: 0.98, alpha: 1).cgColor
+        ]
+        fillLayer.startPoint = CGPoint(x: 0, y: 0)
+        fillLayer.endPoint = CGPoint(x: 1, y: 1)
+        fillLayer.masksToBounds = true
+        layer?.addSublayer(fillLayer)
+
+        let clear = NSColor.white.withAlphaComponent(0).cgColor
+        let highlight = NSColor.white.withAlphaComponent(0.24).cgColor
+        shimmerLayer.colors = [clear, highlight, clear, highlight, clear]
+        shimmerLayer.locations = [0, 0.25, 0.5, 0.75, 1]
+        shimmerLayer.startPoint = CGPoint(x: 0, y: 0.5)
+        shimmerLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        fillLayer.addSublayer(shimmerLayer)
+        waveLayer.fillColor = NSColor.white.withAlphaComponent(0.15).cgColor
+        fillLayer.addSublayer(waveLayer)
+
+        displayOptionsObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in self?.updateAnimations() }
+        visibilityObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification,
+            object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let self, let window = notification.object as? NSWindow, window === self.window else { return }
+            self.updateAnimations()
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit {
+        if let displayOptionsObserver { NSWorkspace.shared.notificationCenter.removeObserver(displayOptionsObserver) }
+        if let visibilityObserver { NotificationCenter.default.removeObserver(visibilityObserver) }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateAnimations()
+    }
+
+    override func layout() {
+        super.layout()
+        let size = CGSize(width: bounds.width * CGFloat(max(0, min(100, percent))) / 100, height: bounds.height)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.cornerRadius = bounds.height / 2
+        fillLayer.frame = CGRect(origin: .zero, size: size)
+        fillLayer.cornerRadius = bounds.height / 2
+        shimmerLayer.frame = CGRect(x: 0, y: 0, width: size.width * 2, height: size.height)
+
+        // One extra wavelength lets the ribbon loop without a visible seam.
+        let wave = CGMutablePath()
+        wave.move(to: CGPoint(x: 0, y: 0))
+        let waveWidth = size.width + 96
+        for x in stride(from: CGFloat(0), through: ceil(waveWidth), by: 2) {
+            wave.addLine(to: CGPoint(x: x, y: size.height * 0.48 + sin(x * .pi * 2 / 96) * 2))
+        }
+        wave.addLine(to: CGPoint(x: waveWidth, y: 0))
+        wave.closeSubpath()
+        waveLayer.path = wave
+        CATransaction.commit()
+        if fillSize != size {
+            shimmerLayer.removeAllAnimations()
+            fillSize = size
+        }
+        updateAnimations()
+    }
+
+    private func updateAnimations() {
+        let visible = window?.occlusionState.contains(.visible) == true && !isHiddenOrHasHiddenAncestor
+        guard visible, percent > 0, fillSize.width > 0,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            shimmerLayer.removeAllAnimations()
+            waveLayer.removeAllAnimations()
+            return
+        }
+        if shimmerLayer.animation(forKey: "flow") == nil {
+            addFlow(to: shimmerLayer, distance: fillSize.width, duration: 3.6)
+        }
+        if waveLayer.animation(forKey: "flow") == nil {
+            addFlow(to: waveLayer, distance: 96, duration: 4.8)
+        }
+    }
+
+    private func addFlow(to layer: CALayer, distance: CGFloat, duration: TimeInterval) {
+        let animation = CABasicAnimation(keyPath: "transform.translation.x")
+        animation.fromValue = -distance
+        animation.toValue = 0
+        animation.duration = duration
+        animation.repeatCount = .infinity
+        animation.timingFunction = CAMediaTimingFunction(name: .linear)
+        layer.add(animation, forKey: "flow")
+    }
+}
+
 final class UsageView: NSView {
     var requestHide: (() -> Void)?
     private let headerCenterY: CGFloat = 29
@@ -32,10 +154,11 @@ final class UsageView: NSView {
     private let trafficLightLeftX: CGFloat = 18
     private let trafficLightSpacing: CGFloat = 20
     private let cardTopY: CGFloat = 58
-    private let cardHeight: CGFloat = 88
-    private let cardVerticalStep: CGFloat = 102
+    private let cardHeight: CGFloat = 94
+    private let cardVerticalStep: CGFloat = 108
     private let footerGap: CGFloat = 10
     private let footerHeight: CGFloat = 30
+    private var progressViews: [FlowProgressView] = []
 
     var snapshot = UsageSnapshot(
         fiveHour: nil,
@@ -45,10 +168,34 @@ final class UsageView: NSView {
         updatedAt: Date(),
         status: "Connecting..."
     ) {
-        didSet { needsDisplay = true }
+        didSet {
+            needsDisplay = true
+            needsLayout = true
+        }
     }
 
     override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        let cards = usageCards()
+        while progressViews.count < cards.count {
+            let progress = FlowProgressView(frame: .zero)
+            progressViews.append(progress)
+            addSubview(progress)
+        }
+        while progressViews.count > cards.count {
+            progressViews.removeLast().removeFromSuperview()
+        }
+        for (index, card) in cards.enumerated() {
+            let progress = progressViews[index]
+            progress.frame = CGRect(
+                x: 34, y: cardTopY + CGFloat(index) * cardVerticalStep + 71,
+                width: bounds.width - 68, height: 16
+            )
+            progress.percent = card.window.remainingPercent
+        }
+    }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
@@ -259,11 +406,6 @@ final class UsageView: NSView {
             weight: .medium,
             color: NSColor(calibratedRed: 0.72, green: 0.76, blue: 0.98, alpha: 0.95)
         )
-
-        drawSegmentBar(
-            percent: limit.remainingPercent,
-            rect: CGRect(x: rect.minX + 16, y: resetRect.maxY + 10, width: rect.width - 32, height: 10)
-        )
     }
 
     private func drawIcon(_ icon: LimitIcon, in rect: CGRect) {
@@ -313,36 +455,11 @@ final class UsageView: NSView {
         }
     }
 
-    private func drawSegmentBar(percent: Int, rect: CGRect) {
-        let gap: CGFloat = 3
-        let segmentWidth = (rect.width - gap * 9) / 10
-        let filled = Int(ceil(Double(max(0, min(100, percent))) / 10.0))
-
-        for index in 0..<10 {
-            let segmentRect = CGRect(
-                x: rect.minX + CGFloat(index) * (segmentWidth + gap),
-                y: rect.minY,
-                width: segmentWidth,
-                height: rect.height
-            )
-            let path = NSBezierPath(roundedRect: segmentRect, xRadius: 2, yRadius: 2)
-            if index < filled {
-                NSGradient(colors: [
-                    NSColor(calibratedRed: 0.05, green: 0.65, blue: 1.0, alpha: 1),
-                    NSColor(calibratedRed: 0.09, green: 0.83, blue: 1.0, alpha: 1)
-                ])?.draw(in: path, angle: 90)
-            } else {
-                NSColor(calibratedRed: 0.16, green: 0.21, blue: 0.38, alpha: 1).setFill()
-                path.fill()
-            }
-        }
-    }
-
     static func windowHeight(cardCount: Int) -> CGFloat {
         let contentCardCount = max(1, cardCount)
         let cardTopY: CGFloat = 58
-        let cardHeight: CGFloat = 88
-        let cardVerticalStep: CGFloat = 102
+        let cardHeight: CGFloat = 94
+        let cardVerticalStep: CGFloat = 108
         let footerGap: CGFloat = 10
         let footerHeight: CGFloat = 30
         let footerBottomPadding: CGFloat = 10
