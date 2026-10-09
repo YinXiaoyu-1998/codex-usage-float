@@ -41,7 +41,7 @@ This installs `~/Library/LaunchAgents/local.codex.usagefloat.plist`. The LaunchA
 ## UI Behavior
 
 - Continuous usage bars change with remaining quota: green at 70–100% (swaying leaves), blue at 40–69% (water), yellow at 10–39% (sunset), and red below 10% (slow warning blink, including at 0%). Animations stop when the window is hidden or macOS Reduce Motion is enabled.
-- Drag the handle at the right end of a filled bar to preview its colors and animations. Releasing it returns to the latest real quota; the preview never changes usage data or triggers reset notifications.
+- Drag the invisible handle at the right end of a filled bar to preview its colors and animations. Releasing it returns to the latest real quota; the preview never changes usage data or triggers reset notifications.
 - Click the red dot to quit.
 - Click the yellow dot to hide the floating window.
 - Click the menu bar item to show or hide the floating window.

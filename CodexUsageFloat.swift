@@ -61,7 +61,6 @@ final class FlowProgressView: NSView {
     private let shimmerLayer = CAGradientLayer()
     private let waveLayer = CAShapeLayer()
     private let accentLayer = CAShapeLayer()
-    private let handleLayer = CAShapeLayer()
     private var displayOptionsObserver: NSObjectProtocol?
     private var visibilityObserver: NSObjectProtocol?
     private var fillSize = CGSize.zero
@@ -108,8 +107,6 @@ final class FlowProgressView: NSView {
         waveLayer.fillColor = NSColor.white.withAlphaComponent(0.15).cgColor
         fillLayer.addSublayer(waveLayer)
         fillLayer.addSublayer(accentLayer)
-        handleLayer.fillColor = NSColor.white.withAlphaComponent(0.70).cgColor
-        layer?.addSublayer(handleLayer)
         toolTip = "Drag the handle to preview quota colors. Release to restore live usage."
 
         displayOptionsObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -286,11 +283,6 @@ final class FlowProgressView: NSView {
             accents.addEllipse(in: CGRect(x: size.width * 0.65 - 9, y: size.height * 0.48 - 9, width: 18, height: 18))
         }
         accentLayer.path = accents
-        let grip = CGMutablePath()
-        for offset in [CGFloat(-2.5), 2.5] {
-            grip.addRoundedRect(in: CGRect(x: handleCenterX + offset - 0.9, y: bounds.midY - 6, width: 1.8, height: 12), cornerWidth: 0.9, cornerHeight: 0.9)
-        }
-        handleLayer.path = grip
         CATransaction.commit()
         fillSize = size
         previousMood = mood
