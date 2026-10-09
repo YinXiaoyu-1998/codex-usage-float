@@ -1,4 +1,5 @@
 import Cocoa
+import QuartzCore
 import UserNotifications
 
 struct LimitWindow {
@@ -25,6 +26,328 @@ struct UsageSnapshot {
     }
 }
 
+final class FlowProgressView: NSView {
+    private enum Mood {
+        case meadow, water, sunset, danger
+
+        static func forPercent(_ percent: Int) -> Mood {
+            switch percent {
+            case 70...: return .meadow
+            case 40..<70: return .water
+            case 10..<40: return .sunset
+            default: return .danger
+            }
+        }
+
+        var colors: [NSColor] {
+            switch self {
+            case .meadow:
+                return [NSColor(calibratedRed: 0.12, green: 0.60, blue: 0.29, alpha: 1),
+                        NSColor(calibratedRed: 0.48, green: 0.88, blue: 0.49, alpha: 1)]
+            case .water:
+                return [NSColor(calibratedRed: 0.02, green: 0.65, blue: 0.98, alpha: 1),
+                        NSColor(calibratedRed: 0.05, green: 0.83, blue: 0.98, alpha: 1)]
+            case .sunset:
+                return [NSColor(calibratedRed: 0.97, green: 0.61, blue: 0.12, alpha: 1),
+                        NSColor(calibratedRed: 1, green: 0.86, blue: 0.35, alpha: 1)]
+            case .danger:
+                return [NSColor(calibratedRed: 0.85, green: 0.13, blue: 0.20, alpha: 1),
+                        NSColor(calibratedRed: 1, green: 0.39, blue: 0.33, alpha: 1)]
+            }
+        }
+    }
+
+    private let fillLayer = CAGradientLayer()
+    private let shimmerLayer = CAGradientLayer()
+    private let waveLayer = CAShapeLayer()
+    private let accentLayer = CAShapeLayer()
+    private var displayOptionsObserver: NSObjectProtocol?
+    private var visibilityObserver: NSObjectProtocol?
+    private var fillSize = CGSize.zero
+    private var previousMood: Mood?
+    private var previewPercent: CGFloat?
+    private var isDragging = false
+    private var dragStartX: CGFloat = 0
+    private var dragStartPercent: CGFloat = 0
+    private var returnTimer: Timer?
+    private var dragCursorPushed = false
+
+    var displayedPercent: CGFloat {
+        previewPercent ?? CGFloat(max(0, min(100, percent)))
+    }
+
+    var percent = 0 {
+        didSet {
+            if oldValue != percent { needsLayout = true }
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor(calibratedRed: 0.16, green: 0.21, blue: 0.38, alpha: 1).cgColor
+        layer?.masksToBounds = true
+
+        fillLayer.colors = [
+            NSColor(calibratedRed: 0.02, green: 0.65, blue: 0.98, alpha: 1).cgColor,
+            NSColor(calibratedRed: 0.05, green: 0.83, blue: 0.98, alpha: 1).cgColor
+        ]
+        fillLayer.startPoint = CGPoint(x: 0, y: 0)
+        fillLayer.endPoint = CGPoint(x: 1, y: 1)
+        fillLayer.masksToBounds = true
+        layer?.addSublayer(fillLayer)
+
+        let clear = NSColor.white.withAlphaComponent(0).cgColor
+        let highlight = NSColor.white.withAlphaComponent(0.24).cgColor
+        shimmerLayer.colors = [clear, highlight, clear, highlight, clear]
+        shimmerLayer.locations = [0, 0.25, 0.5, 0.75, 1]
+        shimmerLayer.startPoint = CGPoint(x: 0, y: 0.5)
+        shimmerLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        fillLayer.addSublayer(shimmerLayer)
+        waveLayer.fillColor = NSColor.white.withAlphaComponent(0.15).cgColor
+        fillLayer.addSublayer(waveLayer)
+        fillLayer.addSublayer(accentLayer)
+        toolTip = "Drag the handle to preview quota colors. Release to restore live usage."
+
+        displayOptionsObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            if self.returnTimer != nil && NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                self.restoreActualPercent(animated: false)
+            }
+            self.updateAnimations()
+        }
+        visibilityObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification,
+            object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let self, let window = notification.object as? NSWindow, window === self.window else { return }
+            if !window.occlusionState.contains(.visible) { self.restoreActualPercent(animated: false) }
+            self.updateAnimations()
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit {
+        returnTimer?.invalidate()
+        if dragCursorPushed { NSCursor.pop() }
+        if let displayOptionsObserver { NSWorkspace.shared.notificationCenter.removeObserver(displayOptionsObserver) }
+        if let visibilityObserver { NotificationCenter.default.removeObserver(visibilityObserver) }
+    }
+
+    private var handleCenterX: CGFloat {
+        max(8, min(bounds.width - 8, bounds.width * displayedPercent / 100 - 8))
+    }
+
+    private var handleRect: CGRect {
+        CGRect(x: handleCenterX - 12, y: 0, width: 24, height: bounds.height).intersection(bounds)
+    }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var acceptsFirstResponder: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHiddenOrHasHiddenAncestor else { return nil }
+        return handleRect.contains(convert(point, from: superview)) ? self : nil
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(handleRect, cursor: .pointingHand)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard handleRect.contains(point) else { return }
+        returnTimer?.invalidate()
+        returnTimer = nil
+        dragStartPercent = displayedPercent
+        previewPercent = dragStartPercent
+        dragStartX = point.x
+        isDragging = true
+        window?.makeFirstResponder(self)
+        if !dragCursorPushed {
+            NSCursor.closedHand.push()
+            dragCursorPushed = true
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isDragging, bounds.width > 0 else { return }
+        let x = convert(event.locationInWindow, from: nil).x
+        previewPercent = max(0, min(100, dragStartPercent + (x - dragStartX) / bounds.width * 100))
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isDragging else { return }
+        restoreActualPercent(animated: true)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        restoreActualPercent(animated: true)
+    }
+
+    private func restoreActualPercent(animated: Bool) {
+        returnTimer?.invalidate()
+        returnTimer = nil
+        isDragging = false
+        if dragCursorPushed {
+            NSCursor.pop()
+            dragCursorPushed = false
+        }
+        guard let startPercent = previewPercent else { return }
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              window?.occlusionState.contains(.visible) == true else {
+            previewPercent = nil
+            needsLayout = true
+            layoutSubtreeIfNeeded()
+            return
+        }
+
+        let startedAt = CACurrentMediaTime()
+        // The timer exists only during the short return; ambient motion stays on Core Animation.
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
+            guard let self else { timer.invalidate(); return }
+            let progress = min(1, (CACurrentMediaTime() - startedAt) / 0.32)
+            let eased = CGFloat(1 - pow(1 - progress, 3))
+            let target = CGFloat(max(0, min(100, self.percent)))
+            self.previewPercent = progress >= 1 ? nil : startPercent + (target - startPercent) * eased
+            self.needsLayout = true
+            self.layoutSubtreeIfNeeded()
+            if progress >= 1 {
+                timer.invalidate()
+                self.returnTimer = nil
+            }
+        }
+        returnTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { restoreActualPercent(animated: false) }
+        updateAnimations()
+    }
+
+    override func layout() {
+        super.layout()
+        let size = CGSize(width: bounds.width * displayedPercent / 100, height: bounds.height)
+        let mood = Mood.forPercent(Int(displayedPercent))
+        if previousMood != mood {
+            stopAnimations()
+        } else if fillSize != size {
+            shimmerLayer.removeAllAnimations()
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.cornerRadius = bounds.height / 2
+        layer?.backgroundColor = mood.colors[0].blended(withFraction: 0.80, of: .black)?.cgColor
+        fillLayer.colors = mood.colors.map { $0.cgColor }
+        fillLayer.frame = CGRect(origin: .zero, size: size)
+        fillLayer.cornerRadius = bounds.height / 2
+        shimmerLayer.frame = CGRect(x: 0, y: 0, width: size.width * 2, height: size.height)
+
+        // One extra wavelength lets the ribbon loop without a visible seam.
+        let wave = CGMutablePath()
+        wave.move(to: CGPoint(x: 0, y: 0))
+        let waveWidth = size.width + 96
+        for x in stride(from: CGFloat(0), through: ceil(waveWidth), by: 2) {
+            let amplitude: CGFloat = mood == .sunset ? 0 : 2
+            wave.addLine(to: CGPoint(x: x, y: size.height * 0.48 + sin(x * .pi * 2 / 96) * amplitude))
+        }
+        wave.addLine(to: CGPoint(x: waveWidth, y: 0))
+        wave.closeSubpath()
+        waveLayer.path = wave
+        waveLayer.isHidden = mood == .danger
+        shimmerLayer.isHidden = mood == .danger
+        accentLayer.frame = CGRect(origin: .zero, size: size)
+        accentLayer.isHidden = mood == .water || mood == .danger
+        accentLayer.fillColor = NSColor(calibratedRed: 1, green: 0.97, blue: 0.75, alpha: 0.45).cgColor
+        let accents = CGMutablePath()
+        if mood == .meadow {
+            for fraction in [CGFloat(0.22), 0.55, 0.82] {
+                let x = size.width * fraction
+                let y = size.height * 0.50
+                accents.move(to: CGPoint(x: x - 5, y: y - 2))
+                accents.addQuadCurve(to: CGPoint(x: x + 5, y: y + 2), control: CGPoint(x: x + 3, y: y - 7))
+                accents.addQuadCurve(to: CGPoint(x: x - 5, y: y - 2), control: CGPoint(x: x - 3, y: y + 7))
+                accents.closeSubpath()
+            }
+        } else if mood == .sunset {
+            accents.addEllipse(in: CGRect(x: size.width * 0.65 - 9, y: size.height * 0.48 - 9, width: 18, height: 18))
+        }
+        accentLayer.path = accents
+        CATransaction.commit()
+        fillSize = size
+        previousMood = mood
+        window?.invalidateCursorRects(for: self)
+        updateAnimations()
+    }
+
+    private func stopAnimations() {
+        layer?.removeAnimation(forKey: "danger")
+        shimmerLayer.removeAllAnimations()
+        waveLayer.removeAllAnimations()
+        accentLayer.removeAllAnimations()
+    }
+
+    private func updateAnimations() {
+        let visible = window?.occlusionState.contains(.visible) == true && !isHiddenOrHasHiddenAncestor
+        guard visible,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            stopAnimations()
+            return
+        }
+        let mood = Mood.forPercent(Int(displayedPercent))
+        if mood == .danger {
+            if layer?.animation(forKey: "danger") == nil, let layer {
+                addBreathing(to: layer, key: "danger", keyPath: "opacity", from: 0.50, to: 1, duration: 0.85)
+            }
+            return
+        }
+        guard fillSize.width > 0 else { return }
+        if shimmerLayer.animation(forKey: "flow") == nil {
+            let duration: TimeInterval = mood == .water ? 3.6 : 9
+            addFlow(to: shimmerLayer, distance: fillSize.width, duration: duration)
+        }
+        if mood != .sunset, waveLayer.animation(forKey: "flow") == nil {
+            addFlow(to: waveLayer, distance: 96, duration: mood == .water ? 4.8 : 8)
+        }
+        if mood == .meadow, accentLayer.animation(forKey: "sway") == nil {
+            addBreathing(to: accentLayer, key: "sway", keyPath: "transform.translation.y", from: -2, to: 2, duration: 2.8)
+        } else if mood == .sunset, accentLayer.animation(forKey: "glow") == nil {
+            addBreathing(to: accentLayer, key: "glow", keyPath: "opacity", from: 0.35, to: 1, duration: 3.5)
+        }
+    }
+
+    private func addBreathing(to layer: CALayer, key: String, keyPath: String, from: CGFloat, to: CGFloat, duration: TimeInterval) {
+        let animation = CABasicAnimation(keyPath: keyPath)
+        animation.fromValue = from
+        animation.toValue = to
+        animation.duration = duration
+        animation.autoreverses = true
+        animation.repeatCount = .infinity
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(animation, forKey: key)
+    }
+
+    private func addFlow(to layer: CALayer, distance: CGFloat, duration: TimeInterval) {
+        let animation = CABasicAnimation(keyPath: "transform.translation.x")
+        animation.fromValue = -distance
+        animation.toValue = 0
+        animation.duration = duration
+        animation.repeatCount = .infinity
+        animation.timingFunction = CAMediaTimingFunction(name: .linear)
+        layer.add(animation, forKey: "flow")
+    }
+}
+
 final class UsageView: NSView {
     var requestHide: (() -> Void)?
     private let headerCenterY: CGFloat = 29
@@ -32,10 +355,11 @@ final class UsageView: NSView {
     private let trafficLightLeftX: CGFloat = 18
     private let trafficLightSpacing: CGFloat = 20
     private let cardTopY: CGFloat = 58
-    private let cardHeight: CGFloat = 88
-    private let cardVerticalStep: CGFloat = 102
+    private let cardHeight: CGFloat = 103.6
+    private let cardVerticalStep: CGFloat = 117.6
     private let footerGap: CGFloat = 10
     private let footerHeight: CGFloat = 30
+    private var progressViews: [FlowProgressView] = []
 
     var snapshot = UsageSnapshot(
         fiveHour: nil,
@@ -45,10 +369,34 @@ final class UsageView: NSView {
         updatedAt: Date(),
         status: "Connecting..."
     ) {
-        didSet { needsDisplay = true }
+        didSet {
+            needsDisplay = true
+            needsLayout = true
+        }
     }
 
     override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        let cards = usageCards()
+        while progressViews.count < cards.count {
+            let progress = FlowProgressView(frame: .zero)
+            progressViews.append(progress)
+            addSubview(progress)
+        }
+        while progressViews.count > cards.count {
+            progressViews.removeLast().removeFromSuperview()
+        }
+        for (index, card) in cards.enumerated() {
+            let progress = progressViews[index]
+            progress.frame = CGRect(
+                x: 34, y: cardTopY + CGFloat(index) * cardVerticalStep + 71,
+                width: bounds.width - 68, height: 25.6
+            )
+            progress.percent = card.window.remainingPercent
+        }
+    }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
@@ -259,11 +607,6 @@ final class UsageView: NSView {
             weight: .medium,
             color: NSColor(calibratedRed: 0.72, green: 0.76, blue: 0.98, alpha: 0.95)
         )
-
-        drawSegmentBar(
-            percent: limit.remainingPercent,
-            rect: CGRect(x: rect.minX + 16, y: resetRect.maxY + 10, width: rect.width - 32, height: 10)
-        )
     }
 
     private func drawIcon(_ icon: LimitIcon, in rect: CGRect) {
@@ -313,36 +656,11 @@ final class UsageView: NSView {
         }
     }
 
-    private func drawSegmentBar(percent: Int, rect: CGRect) {
-        let gap: CGFloat = 3
-        let segmentWidth = (rect.width - gap * 9) / 10
-        let filled = Int(ceil(Double(max(0, min(100, percent))) / 10.0))
-
-        for index in 0..<10 {
-            let segmentRect = CGRect(
-                x: rect.minX + CGFloat(index) * (segmentWidth + gap),
-                y: rect.minY,
-                width: segmentWidth,
-                height: rect.height
-            )
-            let path = NSBezierPath(roundedRect: segmentRect, xRadius: 2, yRadius: 2)
-            if index < filled {
-                NSGradient(colors: [
-                    NSColor(calibratedRed: 0.05, green: 0.65, blue: 1.0, alpha: 1),
-                    NSColor(calibratedRed: 0.09, green: 0.83, blue: 1.0, alpha: 1)
-                ])?.draw(in: path, angle: 90)
-            } else {
-                NSColor(calibratedRed: 0.16, green: 0.21, blue: 0.38, alpha: 1).setFill()
-                path.fill()
-            }
-        }
-    }
-
     static func windowHeight(cardCount: Int) -> CGFloat {
         let contentCardCount = max(1, cardCount)
         let cardTopY: CGFloat = 58
-        let cardHeight: CGFloat = 88
-        let cardVerticalStep: CGFloat = 102
+        let cardHeight: CGFloat = 103.6
+        let cardVerticalStep: CGFloat = 117.6
         let footerGap: CGFloat = 10
         let footerHeight: CGFloat = 30
         let footerBottomPadding: CGFloat = 10
