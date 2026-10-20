@@ -26,6 +26,27 @@ struct UsageSnapshot {
     }
 }
 
+private extension NSColor {
+    convenience init(hex: UInt32, alpha: CGFloat = 1) {
+        self.init(
+            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: alpha
+        )
+    }
+}
+
+/// One quota window drawn as a dark glass trough.
+///
+/// The four remaining-quota tiers keep their own motion language:
+/// - meadow (>= 70%): two wide caustic bands drifting slowly in opposite directions
+/// - water (40-69%): thin diagonal ribbons flowing towards the tip
+/// - sunset (10-39%): a warm bloom breathing at the tip
+/// - danger (< 10%): a scan beam sweeping the trough with a double-beat rim
+///
+/// Every tier shares the same glass body, gloss and colour grammar.
+/// The drag handle at the fill end stays invisible; there is no bead or marker drawn there.
 final class FlowProgressView: NSView {
     private enum Mood {
         case meadow, water, sunset, danger
@@ -38,32 +59,82 @@ final class FlowProgressView: NSView {
             default: return .danger
             }
         }
+    }
 
-        var colors: [NSColor] {
-            switch self {
-            case .meadow:
-                return [NSColor(calibratedRed: 0.12, green: 0.60, blue: 0.29, alpha: 1),
-                        NSColor(calibratedRed: 0.48, green: 0.88, blue: 0.49, alpha: 1)]
-            case .water:
-                return [NSColor(calibratedRed: 0.02, green: 0.65, blue: 0.98, alpha: 1),
-                        NSColor(calibratedRed: 0.05, green: 0.83, blue: 0.98, alpha: 1)]
-            case .sunset:
-                return [NSColor(calibratedRed: 0.97, green: 0.61, blue: 0.12, alpha: 1),
-                        NSColor(calibratedRed: 1, green: 0.86, blue: 0.35, alpha: 1)]
-            case .danger:
-                return [NSColor(calibratedRed: 0.85, green: 0.13, blue: 0.20, alpha: 1),
-                        NSColor(calibratedRed: 1, green: 0.39, blue: 0.33, alpha: 1)]
-            }
+    private struct Skin {
+        let top: NSColor
+        let upper: NSColor
+        let lower: NSColor
+        let bottom: NSColor
+        let rim: NSColor
+        let rimAlpha: CGFloat
+    }
+
+    private static func skin(for mood: Mood) -> Skin {
+        switch mood {
+        case .meadow:
+            return Skin(
+                top: NSColor(hex: 0x8DFFCE),
+                upper: NSColor(hex: 0x2EE08A),
+                lower: NSColor(hex: 0x14B06D),
+                bottom: NSColor(hex: 0x0A7C46),
+                rim: NSColor(hex: 0xB9FFDC),
+                rimAlpha: 0.24
+            )
+        case .water:
+            return Skin(
+                top: NSColor(hex: 0x9AF2FF),
+                upper: NSColor(hex: 0x2FB4F5),
+                lower: NSColor(hex: 0x1479D6),
+                bottom: NSColor(hex: 0x0A4F9E),
+                rim: NSColor(hex: 0xB7ECFF),
+                rimAlpha: 0.26
+            )
+        case .sunset:
+            return Skin(
+                top: NSColor(hex: 0xFFD98A),
+                upper: NSColor(hex: 0xF7B32B),
+                lower: NSColor(hex: 0xD97706),
+                bottom: NSColor(hex: 0x8F3D05),
+                rim: NSColor(hex: 0xFFD9A0),
+                rimAlpha: 0.30
+            )
+        case .danger:
+            return Skin(
+                top: NSColor(hex: 0xFF9A86),
+                upper: NSColor(hex: 0xEF4444),
+                lower: NSColor(hex: 0xB91C1C),
+                bottom: NSColor(hex: 0x5F0D0D),
+                rim: NSColor(hex: 0xFFC6BB),
+                rimAlpha: 0.55
+            )
         }
     }
 
-    private let fillLayer = CAGradientLayer()
-    private let shimmerLayer = CAGradientLayer()
-    private let waveLayer = CAShapeLayer()
-    private let accentLayer = CAShapeLayer()
+    // Trough.
+    private let trackGradient = CAGradientLayer()
+    private let trackTopShadow = CAGradientLayer()
+    private let trackBottomLine = CALayer()
+    private let trackBorder = CAShapeLayer()
+    private let scanHost = CALayer()
+    private let scanTail = CAGradientLayer()
+    private let scanLine = CALayer()
+
+    // Fill.
+    private let fillClip = CALayer()
+    private let baseGradient = CAGradientLayer()
+    private let causticA = CAGradientLayer()
+    private let causticB = CAGradientLayer()
+    private let stripes = CAShapeLayer()
+    private let sheenLayer = CAGradientLayer()
+    private let warmWash = CAGradientLayer()
+    private let bloom = CAGradientLayer()
+    private let gloss = CAGradientLayer()
+    private let leftShade = CAGradientLayer()
+    private let rim = CAShapeLayer()
+
     private var displayOptionsObserver: NSObjectProtocol?
     private var visibilityObserver: NSObjectProtocol?
-    private var fillSize = CGSize.zero
     private var previousMood: Mood?
     private var previewPercent: CGFloat?
     private var isDragging = false
@@ -85,28 +156,10 @@ final class FlowProgressView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(calibratedRed: 0.16, green: 0.21, blue: 0.38, alpha: 1).cgColor
         layer?.masksToBounds = true
+        layer?.backgroundColor = NSColor(hex: 0x060A14).cgColor
 
-        fillLayer.colors = [
-            NSColor(calibratedRed: 0.02, green: 0.65, blue: 0.98, alpha: 1).cgColor,
-            NSColor(calibratedRed: 0.05, green: 0.83, blue: 0.98, alpha: 1).cgColor
-        ]
-        fillLayer.startPoint = CGPoint(x: 0, y: 0)
-        fillLayer.endPoint = CGPoint(x: 1, y: 1)
-        fillLayer.masksToBounds = true
-        layer?.addSublayer(fillLayer)
-
-        let clear = NSColor.white.withAlphaComponent(0).cgColor
-        let highlight = NSColor.white.withAlphaComponent(0.24).cgColor
-        shimmerLayer.colors = [clear, highlight, clear, highlight, clear]
-        shimmerLayer.locations = [0, 0.25, 0.5, 0.75, 1]
-        shimmerLayer.startPoint = CGPoint(x: 0, y: 0.5)
-        shimmerLayer.endPoint = CGPoint(x: 1, y: 0.5)
-        fillLayer.addSublayer(shimmerLayer)
-        waveLayer.fillColor = NSColor.white.withAlphaComponent(0.15).cgColor
-        fillLayer.addSublayer(waveLayer)
-        fillLayer.addSublayer(accentLayer)
+        configureLayers()
         toolTip = "Drag the handle to preview quota colors. Release to restore live usage."
 
         displayOptionsObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -136,6 +189,141 @@ final class FlowProgressView: NSView {
         if dragCursorPushed { NSCursor.pop() }
         if let displayOptionsObserver { NSWorkspace.shared.notificationCenter.removeObserver(displayOptionsObserver) }
         if let visibilityObserver { NotificationCenter.default.removeObserver(visibilityObserver) }
+    }
+
+    private func configureLayers() {
+        trackGradient.colors = [NSColor(hex: 0x0D1A33).cgColor, NSColor(hex: 0x070C1A).cgColor]
+        trackGradient.startPoint = CGPoint(x: 0.5, y: 0)
+        trackGradient.endPoint = CGPoint(x: 0.5, y: 1)
+        layer?.addSublayer(trackGradient)
+
+        trackTopShadow.colors = [
+            NSColor.black.withAlphaComponent(0.55).cgColor,
+            NSColor.black.withAlphaComponent(0).cgColor
+        ]
+        trackTopShadow.startPoint = CGPoint(x: 0.5, y: 0)
+        trackTopShadow.endPoint = CGPoint(x: 0.5, y: 1)
+        layer?.addSublayer(trackTopShadow)
+
+        trackBottomLine.backgroundColor = NSColor.white.withAlphaComponent(0.05).cgColor
+        layer?.addSublayer(trackBottomLine)
+
+        scanHost.masksToBounds = true
+        scanHost.opacity = 0
+        scanHost.isHidden = true
+        layer?.addSublayer(scanHost)
+        scanTail.colors = [
+            NSColor(hex: 0xFFB3A8, alpha: 0).cgColor,
+            NSColor(hex: 0xFFB3A8, alpha: 0.10).cgColor,
+            NSColor(hex: 0xFFD9D2, alpha: 0.30).cgColor,
+            NSColor(hex: 0xFFF4F1, alpha: 0.50).cgColor
+        ]
+        scanTail.locations = [0, 0.62, 0.90, 1]
+        scanTail.startPoint = CGPoint(x: 0, y: 0.5)
+        scanTail.endPoint = CGPoint(x: 1, y: 0.5)
+        scanHost.addSublayer(scanTail)
+        scanLine.backgroundColor = NSColor(hex: 0xFFF4F1, alpha: 0.8).cgColor
+        scanHost.addSublayer(scanLine)
+
+        fillClip.masksToBounds = true
+        layer?.addSublayer(fillClip)
+
+        baseGradient.startPoint = CGPoint(x: 0, y: 0)
+        baseGradient.endPoint = CGPoint(x: 0.18, y: 1)
+        fillClip.addSublayer(baseGradient)
+
+        causticA.colors = [
+            NSColor(hex: 0xE9FFF6, alpha: 0).cgColor,
+            NSColor(hex: 0xE9FFF6, alpha: 0.34).cgColor,
+            NSColor(hex: 0xFFFFFF, alpha: 0.40).cgColor,
+            NSColor(hex: 0xC9FFE7, alpha: 0).cgColor
+        ]
+        causticA.locations = [0, 0.42, 0.62, 1]
+        causticA.startPoint = CGPoint(x: 0, y: 0.5)
+        causticA.endPoint = CGPoint(x: 1, y: 0.5)
+        causticA.transform = CATransform3DMakeRotation(-0.19, 0, 0, 1)
+        causticA.isHidden = true
+        fillClip.addSublayer(causticA)
+
+        causticB.colors = [
+            NSColor(hex: 0xD8FFF0, alpha: 0).cgColor,
+            NSColor(hex: 0xD8FFF0, alpha: 0.20).cgColor,
+            NSColor(hex: 0xD8FFF0, alpha: 0).cgColor
+        ]
+        causticB.locations = [0, 0.5, 1]
+        causticB.startPoint = CGPoint(x: 0, y: 0.5)
+        causticB.endPoint = CGPoint(x: 1, y: 0.5)
+        causticB.transform = CATransform3DMakeRotation(-0.245, 0, 0, 1)
+        causticB.isHidden = true
+        fillClip.addSublayer(causticB)
+
+        stripes.fillColor = NSColor.white.withAlphaComponent(0.20).cgColor
+        stripes.isHidden = true
+        fillClip.addSublayer(stripes)
+
+        sheenLayer.colors = [
+            NSColor.white.withAlphaComponent(0).cgColor,
+            NSColor.white.withAlphaComponent(0.18).cgColor,
+            NSColor.white.withAlphaComponent(0).cgColor
+        ]
+        sheenLayer.locations = [0, 0.5, 1]
+        sheenLayer.startPoint = CGPoint(x: 0, y: 0.5)
+        sheenLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        sheenLayer.transform = CATransform3DMakeRotation(-0.26, 0, 0, 1)
+        sheenLayer.isHidden = true
+        fillClip.addSublayer(sheenLayer)
+
+        warmWash.colors = [
+            NSColor(hex: 0xFFF3CD, alpha: 0).cgColor,
+            NSColor(hex: 0xFFE6AD, alpha: 0.30).cgColor,
+            NSColor(hex: 0xFF9D2E, alpha: 0).cgColor
+        ]
+        warmWash.locations = [0, 0.55, 1]
+        warmWash.startPoint = CGPoint(x: 0.5, y: 0)
+        warmWash.endPoint = CGPoint(x: 0.5, y: 1)
+        warmWash.isHidden = true
+        fillClip.addSublayer(warmWash)
+
+        bloom.type = .radial
+        bloom.colors = [
+            NSColor(hex: 0xFFF7E0, alpha: 0.80).cgColor,
+            NSColor(hex: 0xFFB347, alpha: 0.30).cgColor,
+            NSColor(hex: 0xF59E0B, alpha: 0).cgColor
+        ]
+        bloom.locations = [0, 0.38, 1]
+        bloom.startPoint = CGPoint(x: 0.5, y: 0.5)
+        bloom.endPoint = CGPoint(x: 1, y: 0.5)
+        bloom.isHidden = true
+        fillClip.addSublayer(bloom)
+
+        gloss.colors = [
+            NSColor.white.withAlphaComponent(0.26).cgColor,
+            NSColor.white.withAlphaComponent(0.03).cgColor,
+            NSColor.black.withAlphaComponent(0.05).cgColor,
+            NSColor.black.withAlphaComponent(0.24).cgColor
+        ]
+        gloss.locations = [0, 0.24, 0.7, 1]
+        gloss.startPoint = CGPoint(x: 0.5, y: 0)
+        gloss.endPoint = CGPoint(x: 0.5, y: 1)
+        fillClip.addSublayer(gloss)
+
+        leftShade.colors = [
+            NSColor.black.withAlphaComponent(0.24).cgColor,
+            NSColor.black.withAlphaComponent(0).cgColor
+        ]
+        leftShade.locations = [0, 1]
+        leftShade.startPoint = CGPoint(x: 0, y: 0.5)
+        leftShade.endPoint = CGPoint(x: 1, y: 0.5)
+        fillClip.addSublayer(leftShade)
+
+        rim.fillColor = nil
+        rim.lineWidth = 1
+        fillClip.addSublayer(rim)
+
+        trackBorder.fillColor = nil
+        trackBorder.lineWidth = 1
+        trackBorder.strokeColor = NSColor(hex: 0xB9C8FF, alpha: 0.13).cgColor
+        layer?.addSublayer(trackBorder)
     }
 
     private var handleCenterX: CGFloat {
@@ -237,129 +425,274 @@ final class FlowProgressView: NSView {
 
     override func layout() {
         super.layout()
-        let size = CGSize(width: bounds.width * displayedPercent / 100, height: bounds.height)
+        let width = bounds.width
+        let height = bounds.height
+        guard width > 0, height > 0 else { return }
+
         let mood = Mood.forPercent(Int(displayedPercent))
+        let fillWidth = max(0, min(width, width * displayedPercent / 100))
         if previousMood != mood {
             stopAnimations()
-        } else if fillSize != size {
-            shimmerLayer.removeAllAnimations()
         }
+
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        layer?.cornerRadius = bounds.height / 2
-        layer?.backgroundColor = mood.colors[0].blended(withFraction: 0.80, of: .black)?.cgColor
-        fillLayer.colors = mood.colors.map { $0.cgColor }
-        fillLayer.frame = CGRect(origin: .zero, size: size)
-        fillLayer.cornerRadius = bounds.height / 2
-        shimmerLayer.frame = CGRect(x: 0, y: 0, width: size.width * 2, height: size.height)
 
-        // One extra wavelength lets the ribbon loop without a visible seam.
-        let wave = CGMutablePath()
-        wave.move(to: CGPoint(x: 0, y: 0))
-        let waveWidth = size.width + 96
-        for x in stride(from: CGFloat(0), through: ceil(waveWidth), by: 2) {
-            let amplitude: CGFloat = mood == .sunset ? 0 : 2
-            wave.addLine(to: CGPoint(x: x, y: size.height * 0.48 + sin(x * .pi * 2 / 96) * amplitude))
+        layer?.cornerRadius = height / 2
+
+        trackGradient.frame = bounds
+        trackGradient.cornerRadius = height / 2
+        trackTopShadow.frame = CGRect(x: 1, y: 1, width: width - 2, height: 3)
+        trackBottomLine.frame = CGRect(x: 3, y: height - 2.6, width: width - 6, height: 1)
+
+        trackBorder.frame = bounds
+        trackBorder.path = CGPath(
+            roundedRect: CGRect(x: 0.5, y: 0.5, width: width - 1, height: height - 1),
+            cornerWidth: height / 2 - 0.5, cornerHeight: height / 2 - 0.5, transform: nil
+        )
+
+        scanHost.bounds = CGRect(x: 0, y: 0, width: 30, height: height)
+        if scanHost.animation(forKey: "scan") == nil {
+            scanHost.position = CGPoint(x: -60, y: height / 2)
         }
-        wave.addLine(to: CGPoint(x: waveWidth, y: 0))
-        wave.closeSubpath()
-        waveLayer.path = wave
-        waveLayer.isHidden = mood == .danger
-        shimmerLayer.isHidden = mood == .danger
-        accentLayer.frame = CGRect(origin: .zero, size: size)
-        accentLayer.isHidden = mood == .water || mood == .danger
-        accentLayer.fillColor = NSColor(calibratedRed: 1, green: 0.97, blue: 0.75, alpha: 0.45).cgColor
-        let accents = CGMutablePath()
-        if mood == .meadow {
-            for fraction in [CGFloat(0.22), 0.55, 0.82] {
-                let x = size.width * fraction
-                let y = size.height * 0.50
-                accents.move(to: CGPoint(x: x - 5, y: y - 2))
-                accents.addQuadCurve(to: CGPoint(x: x + 5, y: y + 2), control: CGPoint(x: x + 3, y: y - 7))
-                accents.addQuadCurve(to: CGPoint(x: x - 5, y: y - 2), control: CGPoint(x: x - 3, y: y + 7))
-                accents.closeSubpath()
-            }
-        } else if mood == .sunset {
-            accents.addEllipse(in: CGRect(x: size.width * 0.65 - 9, y: size.height * 0.48 - 9, width: 18, height: 18))
+        scanTail.frame = CGRect(x: 0, y: 1.5, width: 26, height: height - 3)
+        scanLine.frame = CGRect(x: 24.2, y: 2.5, width: 1.8, height: height - 5)
+
+        fillClip.frame = CGRect(x: 0, y: 0, width: fillWidth, height: height)
+        fillClip.cornerRadius = min(height / 2, fillWidth / 2)
+        baseGradient.frame = fillClip.bounds
+        gloss.frame = fillClip.bounds
+        leftShade.frame = CGRect(x: 0, y: 0, width: 14, height: height)
+
+        stripes.frame = CGRect(x: 0, y: 0, width: fillWidth, height: height)
+        stripes.path = stripePath(width: fillWidth, height: height)
+
+        causticA.bounds = CGRect(x: 0, y: 0, width: 64, height: height + 16)
+        causticA.position = CGPoint(x: 0, y: height / 2)
+        causticB.bounds = CGRect(x: 0, y: 0, width: 112, height: height + 24)
+        causticB.position = CGPoint(x: 0, y: height / 2)
+        sheenLayer.bounds = CGRect(x: 0, y: 0, width: 16, height: height + 16)
+        sheenLayer.position = CGPoint(x: 0, y: height / 2)
+
+        warmWash.frame = CGRect(x: 0, y: -4, width: fillWidth, height: height + 8)
+        bloom.bounds = CGRect(x: 0, y: 0, width: 52, height: 52)
+        bloom.position = CGPoint(x: max(12, fillWidth - 14), y: height / 2)
+
+        rim.frame = fillClip.bounds
+        if fillWidth > 1.5 {
+            rim.path = CGPath(
+                roundedRect: CGRect(x: 0.5, y: 0.5, width: fillWidth - 1, height: height - 1),
+                cornerWidth: height / 2 - 0.5, cornerHeight: height / 2 - 0.5, transform: nil
+            )
+        } else {
+            rim.path = nil
         }
-        accentLayer.path = accents
+
+        applySkin(mood)
         CATransaction.commit()
-        fillSize = size
+
         previousMood = mood
         window?.invalidateCursorRects(for: self)
         updateAnimations()
     }
 
-    private func stopAnimations() {
-        layer?.removeAnimation(forKey: "danger")
-        shimmerLayer.removeAllAnimations()
-        waveLayer.removeAllAnimations()
-        accentLayer.removeAllAnimations()
+    private func stripePath(width: CGFloat, height: CGFloat) -> CGPath {
+        // Repeating ribbons, clipped by the fill. One animation period equals one ribbon period.
+        let period: CGFloat = 66
+        let band: CGFloat = 10
+        let skew: CGFloat = 12
+        let path = CGMutablePath()
+        var x = -period * 3
+        while x < width + period {
+            path.move(to: CGPoint(x: x, y: height))
+            path.addLine(to: CGPoint(x: x + band, y: height))
+            path.addLine(to: CGPoint(x: x + band + skew, y: 0))
+            path.addLine(to: CGPoint(x: x + skew, y: 0))
+            path.closeSubpath()
+            x += period
+        }
+        return path
+    }
+
+    static func accentColor(forPercent percent: Int) -> NSColor {
+        skin(for: Mood.forPercent(percent)).top
+    }
+
+    private func applySkin(_ mood: Mood) {
+        let skin = FlowProgressView.skin(for: mood)
+        baseGradient.colors = [skin.top, skin.upper, skin.lower, skin.bottom].map { $0.cgColor }
+        baseGradient.locations = [0, 0.34, 0.72, 1]
+        rim.strokeColor = skin.rim.withAlphaComponent(skin.rimAlpha).cgColor
     }
 
     private func updateAnimations() {
-        let visible = window?.occlusionState.contains(.visible) == true && !isHiddenOrHasHiddenAncestor
-        guard visible,
-              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
-            stopAnimations()
-            return
-        }
         let mood = Mood.forPercent(Int(displayedPercent))
-        if mood == .danger {
-            if layer?.animation(forKey: "danger") == nil, let layer {
-                addBreathing(to: layer, key: "danger", keyPath: "opacity", from: 0.50, to: 1, duration: 0.85)
-            }
+        let visible = window?.occlusionState.contains(.visible) == true && !isHiddenOrHasHiddenAncestor
+        guard visible, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            stopAnimations()
+            setMotionLayersVisible(false, for: mood)
             return
         }
-        guard fillSize.width > 0 else { return }
-        if shimmerLayer.animation(forKey: "flow") == nil {
-            let duration: TimeInterval = mood == .water ? 3.6 : 9
-            addFlow(to: shimmerLayer, distance: fillSize.width, duration: duration)
-        }
-        if mood != .sunset, waveLayer.animation(forKey: "flow") == nil {
-            addFlow(to: waveLayer, distance: 96, duration: mood == .water ? 4.8 : 8)
-        }
-        if mood == .meadow, accentLayer.animation(forKey: "sway") == nil {
-            addBreathing(to: accentLayer, key: "sway", keyPath: "transform.translation.y", from: -2, to: 2, duration: 2.8)
-        } else if mood == .sunset, accentLayer.animation(forKey: "glow") == nil {
-            addBreathing(to: accentLayer, key: "glow", keyPath: "opacity", from: 0.35, to: 1, duration: 3.5)
+        setMotionLayersVisible(true, for: mood)
+        startAnimations(for: mood)
+    }
+
+    private func setMotionLayersVisible(_ visible: Bool, for mood: Mood) {
+        causticA.isHidden = !(visible && mood == .meadow)
+        causticB.isHidden = !(visible && mood == .meadow)
+        stripes.isHidden = !(visible && mood == .water)
+        sheenLayer.isHidden = !(visible && mood == .water)
+        warmWash.isHidden = !(visible && mood == .sunset)
+        bloom.isHidden = !(visible && mood == .sunset)
+        scanHost.isHidden = !(visible && mood == .danger)
+    }
+
+    private func startAnimations(for mood: Mood) {
+        let width = bounds.width
+        guard width > 0 else { return }
+        switch mood {
+        case .meadow:
+            addDrift(causticA, key: "driftA", from: -150, to: width + 60, duration: 15, phase: 3.4)
+            addDrift(causticB, key: "driftB", from: width * 0.7, to: -140, duration: 21, phase: 7.2)
+        case .water:
+            addStripeFlow()
+            addSweep(sheenLayer, key: "sheen", from: -160, to: width + 150, duration: 3.4)
+        case .sunset:
+            addBloomPulse()
+            addWarmShift()
+        case .danger:
+            addScanSweep()
+            addAlertBeat()
         }
     }
 
-    private func addBreathing(to layer: CALayer, key: String, keyPath: String, from: CGFloat, to: CGFloat, duration: TimeInterval) {
-        let animation = CABasicAnimation(keyPath: keyPath)
+    private func addDrift(_ layer: CALayer, key: String, from: CGFloat, to: CGFloat, duration: CFTimeInterval, phase: CFTimeInterval) {
+        guard layer.animation(forKey: key) == nil else { return }
+        let animation = CABasicAnimation(keyPath: "transform.translation.x")
         animation.fromValue = from
         animation.toValue = to
         animation.duration = duration
         animation.autoreverses = true
         animation.repeatCount = .infinity
+        // Start mid-drift so the tier never launches with a uniform, light-less bar.
+        animation.timeOffset = phase
         animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         layer.add(animation, forKey: key)
     }
 
-    private func addFlow(to layer: CALayer, distance: CGFloat, duration: TimeInterval) {
+    private func addSweep(_ layer: CALayer, key: String, from: CGFloat, to: CGFloat, duration: CFTimeInterval) {
+        guard layer.animation(forKey: key) == nil else { return }
         let animation = CABasicAnimation(keyPath: "transform.translation.x")
-        animation.fromValue = -distance
-        animation.toValue = 0
+        animation.fromValue = from
+        animation.toValue = to
         animation.duration = duration
         animation.repeatCount = .infinity
         animation.timingFunction = CAMediaTimingFunction(name: .linear)
-        layer.add(animation, forKey: "flow")
+        layer.add(animation, forKey: key)
+    }
+
+    private func addStripeFlow() {
+        addSweep(stripes, key: "flow", from: 0, to: 66, duration: 1.7)
+    }
+
+    private func addBloomPulse() {
+        guard bloom.animation(forKey: "bloom") == nil else { return }
+        let scale = CABasicAnimation(keyPath: "transform.scale")
+        scale.fromValue = 0.8
+        scale.toValue = 1.18
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0.4
+        fade.toValue = 1
+        let group = CAAnimationGroup()
+        group.animations = [scale, fade]
+        group.duration = 2.4
+        group.autoreverses = true
+        group.repeatCount = .infinity
+        group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        bloom.add(group, forKey: "bloom")
+    }
+
+    private func addWarmShift() {
+        guard warmWash.animation(forKey: "warm") == nil else { return }
+        let shift = CABasicAnimation(keyPath: "transform.translation.y")
+        shift.fromValue = -3
+        shift.toValue = 4
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0.55
+        fade.toValue = 1
+        let group = CAAnimationGroup()
+        group.animations = [shift, fade]
+        group.duration = 4.6
+        group.autoreverses = true
+        group.repeatCount = .infinity
+        group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        warmWash.add(group, forKey: "warm")
+    }
+
+    private func addScanSweep() {
+        guard scanHost.animation(forKey: "scan") == nil else { return }
+        let width = bounds.width
+        let sweep = CAKeyframeAnimation(keyPath: "position.x")
+        sweep.values = [-80, width + 60, width + 60]
+        sweep.keyTimes = [0, 0.64, 1]
+        sweep.duration = 1.7
+        sweep.repeatCount = .infinity
+        sweep.timingFunction = CAMediaTimingFunction(controlPoints: 0.45, 0, 0.55, 1)
+        scanHost.add(sweep, forKey: "scan")
+
+        let fade = CAKeyframeAnimation(keyPath: "opacity")
+        fade.values = [0, 1, 1, 0, 0]
+        fade.keyTimes = [0, 0.1, 0.64, 0.76, 1]
+        fade.duration = 1.7
+        fade.repeatCount = .infinity
+        scanHost.add(fade, forKey: "scanFade")
+    }
+
+    private func addAlertBeat() {
+        guard rim.animation(forKey: "beat") == nil else { return }
+        let beat = CAKeyframeAnimation(keyPath: "opacity")
+        beat.values = [1, 0.14, 1, 0.14, 1, 1]
+        beat.keyTimes = [0, 0.07, 0.15, 0.23, 0.36, 1]
+        beat.duration = 1.7
+        beat.repeatCount = .infinity
+        beat.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        rim.add(beat, forKey: "beat")
+    }
+
+    private func stopAnimations() {
+        let layers: [CALayer] = [causticA, causticB, stripes, sheenLayer, warmWash, bloom, scanHost, rim]
+        for layer in layers { layer.removeAllAnimations() }
+        scanHost.opacity = 0
+        rim.opacity = 1
+        bloom.opacity = 1
+        warmWash.opacity = 1
+        bloom.transform = CATransform3DIdentity
+        warmWash.transform = CATransform3DIdentity
     }
 }
 
 final class UsageView: NSView {
     var requestHide: (() -> Void)?
-    private let headerCenterY: CGFloat = 29
-    private let trafficLightDiameter: CGFloat = 12
-    private let trafficLightLeftX: CGFloat = 18
-    private let trafficLightSpacing: CGFloat = 20
-    private let cardTopY: CGFloat = 58
-    private let cardHeight: CGFloat = 103.6
-    private let cardVerticalStep: CGFloat = 117.6
-    private let footerGap: CGFloat = 10
-    private let footerHeight: CGFloat = 30
     private var progressViews: [FlowProgressView] = []
+
+    private enum Metrics {
+        static let cornerRadius: CGFloat = 22
+        static let sidePadding: CGFloat = 20
+        static let topPadding: CGFloat = 12
+        static let headerHeight: CGFloat = 36
+        static let headerGap: CGFloat = 10
+        static let cardHeight: CGFloat = 122
+        static let cardGap: CGFloat = 10
+        static let cardRadius: CGFloat = 14
+        static let barHeight: CGFloat = 26
+        static let barInset: CGFloat = 16
+        static let barTop: CGFloat = 86
+        static let footerGap: CGFloat = 14
+        static let footerHeight: CGFloat = 26
+        static let bottomPadding: CGFloat = 14
+
+        static var cardsTop: CGFloat { topPadding + headerHeight + headerGap }
+    }
 
     var snapshot = UsageSnapshot(
         fiveHour: nil,
@@ -377,6 +710,44 @@ final class UsageView: NSView {
 
     override var isFlipped: Bool { true }
 
+    // MARK: - Geometry
+
+    private func cardRect(at index: Int) -> CGRect {
+        CGRect(
+            x: Metrics.sidePadding,
+            y: Metrics.cardsTop + CGFloat(index) * (Metrics.cardHeight + Metrics.cardGap),
+            width: bounds.width - Metrics.sidePadding * 2,
+            height: Metrics.cardHeight
+        )
+    }
+
+    private func barRect(in card: CGRect) -> CGRect {
+        CGRect(
+            x: card.minX + Metrics.barInset,
+            y: card.minY + Metrics.barTop,
+            width: card.width - Metrics.barInset * 2,
+            height: Metrics.barHeight
+        )
+    }
+
+    private func footerTop(cardCount: Int) -> CGFloat {
+        let count = max(1, cardCount)
+        return Metrics.cardsTop
+            + CGFloat(count) * Metrics.cardHeight
+            + CGFloat(count - 1) * Metrics.cardGap
+            + Metrics.footerGap
+    }
+
+    static func windowHeight(cardCount: Int) -> CGFloat {
+        let count = max(1, cardCount)
+        return Metrics.cardsTop
+            + CGFloat(count) * Metrics.cardHeight
+            + CGFloat(count - 1) * Metrics.cardGap
+            + Metrics.footerGap
+            + Metrics.footerHeight
+            + Metrics.bottomPadding
+    }
+
     override func layout() {
         super.layout()
         let cards = usageCards()
@@ -390,10 +761,7 @@ final class UsageView: NSView {
         }
         for (index, card) in cards.enumerated() {
             let progress = progressViews[index]
-            progress.frame = CGRect(
-                x: 34, y: cardTopY + CGFloat(index) * cardVerticalStep + 71,
-                width: bounds.width - 68, height: 25.6
-            )
+            progress.frame = barRect(in: cardRect(at: index))
             progress.percent = card.window.remainingPercent
         }
     }
@@ -421,30 +789,36 @@ final class UsageView: NSView {
         }
     }
 
+    // MARK: - Drawing
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        let bounds = self.bounds
         NSColor.clear.setFill()
         bounds.fill()
 
-        drawGlassBackground(in: bounds)
+        drawPanel()
         drawHeader()
 
         let cards = usageCards()
-        let footerY: CGFloat
         if cards.isEmpty {
-            let cardRect = CGRect(x: 18, y: cardTopY, width: bounds.width - 36, height: cardHeight)
-            drawWindow(nil, in: cardRect, icon: .clock)
-            footerY = cardRect.maxY + footerGap
+            // Fill whatever height the window currently has, so a disconnect never
+            // leaves a half-empty panel below the status card.
+            let footerY = bounds.height - Metrics.bottomPadding - Metrics.footerHeight
+            let card = CGRect(
+                x: Metrics.sidePadding,
+                y: Metrics.cardsTop,
+                width: bounds.width - Metrics.sidePadding * 2,
+                height: max(Metrics.cardHeight, footerY - Metrics.footerGap - Metrics.cardsTop)
+            )
+            drawStatusCard(in: card)
+            drawFooter(above: footerY)
         } else {
             for (index, card) in cards.enumerated() {
-                let y = cardTopY + CGFloat(index) * cardVerticalStep
-                drawWindow(card.window, in: CGRect(x: 18, y: y, width: bounds.width - 36, height: cardHeight), icon: card.icon)
+                drawCard(card.window, icon: card.icon, in: cardRect(at: index))
             }
-            footerY = cardTopY + CGFloat(cards.count - 1) * cardVerticalStep + cardHeight + footerGap
+            drawFooter(above: footerTop(cardCount: cards.count))
         }
-        drawFooter(y: footerY)
     }
 
     private enum LimitIcon {
@@ -463,10 +837,27 @@ final class UsageView: NSView {
         return cards
     }
 
-    private func drawGlassBackground(in rect: CGRect) {
-        let background = NSBezierPath(roundedRect: rect, xRadius: 18, yRadius: 18)
-        NSColor(calibratedWhite: 1.0, alpha: 0.30).setFill()
-        background.fill()
+    private func drawPanel() {
+        let path = NSBezierPath(
+            roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+            xRadius: Metrics.cornerRadius,
+            yRadius: Metrics.cornerRadius
+        )
+        NSGradient(colors: [
+            NSColor(srgbRed: 0.070, green: 0.082, blue: 0.112, alpha: 0.94),
+            NSColor(srgbRed: 0.028, green: 0.034, blue: 0.052, alpha: 0.97)
+        ])?.draw(in: path, angle: -90)
+        NSColor.white.withAlphaComponent(0.10).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
+        let highlight = NSBezierPath()
+        highlight.move(to: CGPoint(x: 26, y: 1.4))
+        highlight.line(to: CGPoint(x: bounds.width - 26, y: 1.4))
+        highlight.lineCapStyle = .round
+        highlight.lineWidth = 1.2
+        NSColor.white.withAlphaComponent(0.13).setStroke()
+        highlight.stroke()
     }
 
     private func drawHeader() {
@@ -474,27 +865,36 @@ final class UsageView: NSView {
 
         drawText(
             "Codex Usage",
-            rect: CGRect(x: 88, y: headerCenterY - 17, width: bounds.width - 170, height: 34),
-            size: 24,
-            weight: .bold,
-            color: NSColor(calibratedRed: 0.05, green: 0.08, blue: 0.25, alpha: 1)
+            centerY: headerCenterY,
+            x: 62,
+            width: 260,
+            size: 17,
+            weight: .semibold,
+            color: NSColor.white.withAlphaComponent(0.95),
+            tracking: -0.2
         )
 
+        drawPlanBadge()
+    }
+
+    private func drawPlanBadge() {
         let plan = displayPlanName(snapshot.planType)
-        let badgeWidth = max(CGFloat(54), textWidth(plan, size: 12, weight: .semibold) + 22)
-        let badgeRect = CGRect(x: bounds.width - badgeWidth - 26, y: headerCenterY - 12, width: badgeWidth, height: 24)
-        let badge = NSBezierPath(roundedRect: badgeRect, xRadius: 8, yRadius: 8)
-        NSGradient(colors: [
-            NSColor(calibratedRed: 0.43, green: 0.53, blue: 0.98, alpha: 0.92),
-            NSColor(calibratedRed: 0.36, green: 0.40, blue: 0.90, alpha: 0.92)
-        ])?.draw(in: badge, angle: 90)
+        let width = max(50, textWidth(plan, size: 9.5, weight: .semibold, tracking: 0.10) + 20)
+        let rect = CGRect(x: bounds.width - Metrics.sidePadding - width, y: headerCenterY - 11, width: width, height: 22)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7)
+        NSColor.white.withAlphaComponent(0.08).setFill()
+        path.fill()
+        NSColor.white.withAlphaComponent(0.15).setStroke()
+        path.lineWidth = 1
+        path.stroke()
         drawText(
             plan,
-            rect: badgeRect.insetBy(dx: 8, dy: 4),
-            size: 12,
+            rect: rect.insetBy(dx: 8, dy: 5),
+            size: 9.5,
             weight: .semibold,
-            color: .white,
-            alignment: .center
+            color: NSColor.white.withAlphaComponent(0.88),
+            alignment: .center,
+            tracking: 0.10
         )
     }
 
@@ -514,12 +914,13 @@ final class UsageView: NSView {
         }
     }
 
-    private func textWidth(_ text: String, size: CGFloat, weight: NSFont.Weight) -> CGFloat {
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: size, weight: weight)
-        ]
-        return ceil((text as NSString).size(withAttributes: attributes).width)
+    private var headerCenterY: CGFloat {
+        Metrics.topPadding + Metrics.headerHeight / 2
     }
+
+    private let trafficLightDiameter: CGFloat = 14
+    private let trafficLightLeftX: CGFloat = 13
+    private let trafficLightSpacing: CGFloat = 23.5
 
     private func trafficLightRect(index: Int) -> CGRect {
         CGRect(
@@ -532,175 +933,199 @@ final class UsageView: NSView {
 
     private func drawTrafficLights() {
         let colors = [
-            NSColor(calibratedRed: 1.0, green: 0.37, blue: 0.34, alpha: 1),
-            NSColor(calibratedRed: 1.0, green: 0.73, blue: 0.20, alpha: 1)
+            NSColor(srgbRed: 1.0, green: 0.39, blue: 0.35, alpha: 1),
+            NSColor(srgbRed: 1.0, green: 0.75, blue: 0.24, alpha: 1)
         ]
         for (index, color) in colors.enumerated() {
             let rect = trafficLightRect(index: index)
             let dot = NSBezierPath(ovalIn: rect)
             color.setFill()
             dot.fill()
-            NSColor(calibratedWhite: 0.0, alpha: 0.08).setStroke()
-            dot.lineWidth = 0.5
+            NSColor.black.withAlphaComponent(0.28).setStroke()
+            dot.lineWidth = 0.6
             dot.stroke()
         }
     }
 
-    private func drawWindow(_ limit: LimitWindow?, in rect: CGRect, icon: LimitIcon) {
-        let panel = NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12)
-        NSGradient(colors: [
-            NSColor(calibratedRed: 0.04, green: 0.08, blue: 0.28, alpha: 0.96),
-            NSColor(calibratedRed: 0.02, green: 0.04, blue: 0.18, alpha: 0.98)
-        ])?.draw(in: panel, angle: -20)
+    private func drawCard(_ limit: LimitWindow, icon: LimitIcon, in rect: CGRect) {
+        drawCardChrome(in: rect)
 
-        NSColor(calibratedRed: 0.53, green: 0.67, blue: 1.0, alpha: 0.42).setStroke()
-        panel.lineWidth = 1
-        panel.stroke()
+        let iconRect = CGRect(x: rect.minX + 14, y: rect.minY + 12, width: 26, height: 26)
+        drawWindowIcon(icon, in: iconRect)
+        let rowCenterY = iconRect.midY
 
-        drawIcon(icon, in: CGRect(x: rect.minX + 16, y: rect.minY + 14, width: 42, height: 42))
-
-        guard let limit else {
-            drawText(
-                snapshot.status,
-                rect: CGRect(x: rect.minX + 72, y: rect.minY + 24, width: rect.width - 92, height: 24),
-                size: 12,
-                weight: .medium,
-                color: NSColor(calibratedWhite: 0.88, alpha: 1)
-            )
-            return
-        }
-
-        let isWeekly = limit.title == "Weekly"
-        let titleWidth: CGFloat = isWeekly ? 118 : 54
-        let percentX = rect.minX + (isWeekly ? 178 : 134)
-        let title = limit.title
+        let label = limit.title == "Weekly" ? "WEEKLY WINDOW" : "5-HOUR WINDOW"
         drawText(
-            title,
-            rect: CGRect(x: rect.minX + 74, y: rect.minY + 16, width: titleWidth, height: 30),
-            size: 26,
-            weight: .bold,
-            color: .white
-        )
-
-        drawText(
-            "\(limit.remainingPercent)% left",
-            rect: CGRect(x: percentX, y: rect.minY + 18, width: 130, height: 30),
-            size: 25,
-            weight: .bold,
-            color: NSColor(calibratedRed: 0.43, green: 0.82, blue: 1.0, alpha: 1)
+            label,
+            centerY: rowCenterY,
+            x: rect.minX + 48,
+            width: 220,
+            size: 9.5,
+            weight: .semibold,
+            color: NSColor.white.withAlphaComponent(0.50),
+            tracking: 0.10
         )
 
         drawText(
             "used \(limit.usedPercent)%",
-            rect: CGRect(x: rect.maxX - 86, y: rect.minY + 21, width: 68, height: 18),
-            size: 13,
+            centerY: rowCenterY,
+            x: rect.maxX - 156,
+            width: 142,
+            size: 10.5,
             weight: .medium,
-            color: NSColor(calibratedRed: 0.73, green: 0.76, blue: 0.98, alpha: 1),
+            color: NSColor.white.withAlphaComponent(0.46),
             alignment: .right
         )
 
-        let resetRect = CGRect(x: rect.minX + 74, y: rect.minY + 47, width: rect.width - 92, height: 14)
+        let accent = FlowProgressView.accentColor(forPercent: limit.remainingPercent)
+        let number = "\(limit.remainingPercent)%"
+        let baselineY = rect.minY + 69
+        drawText(
+            number,
+            baselineY: baselineY,
+            x: rect.minX + 14,
+            width: 220,
+            size: 30,
+            weight: .semibold,
+            color: accent,
+            tracking: -0.6,
+            monospaced: true
+        )
+
+        let numberWidth = textWidth(number, size: 30, weight: .semibold, tracking: -0.6, monospaced: true)
+        drawText(
+            "left",
+            baselineY: baselineY,
+            x: rect.minX + 14 + numberWidth + 5,
+            width: 40,
+            size: 11,
+            weight: .medium,
+            color: NSColor.white.withAlphaComponent(0.46)
+        )
+
         drawText(
             resetText(for: limit),
-            rect: resetRect,
-            size: 13,
+            baselineY: baselineY,
+            x: rect.maxX - 260,
+            width: 246,
+            size: 10.5,
             weight: .medium,
-            color: NSColor(calibratedRed: 0.72, green: 0.76, blue: 0.98, alpha: 0.95)
+            color: NSColor.white.withAlphaComponent(0.42),
+            alignment: .right
         )
     }
 
-    private func drawIcon(_ icon: LimitIcon, in rect: CGRect) {
-        let box = NSBezierPath(roundedRect: rect, xRadius: 11, yRadius: 11)
-        NSGradient(colors: [
-            NSColor(calibratedRed: 0.33, green: 0.39, blue: 0.92, alpha: 1),
-            NSColor(calibratedRed: 0.20, green: 0.17, blue: 0.70, alpha: 1)
-        ])?.draw(in: box, angle: -40)
-        NSColor(calibratedRed: 0.62, green: 0.72, blue: 1.0, alpha: 0.55).setStroke()
-        box.lineWidth = 1
-        box.stroke()
+    private func drawStatusCard(in rect: CGRect) {
+        drawCardChrome(in: rect)
+        let iconRect = CGRect(x: rect.minX + 14, y: rect.minY + 12, width: 26, height: 26)
+        drawWindowIcon(.clock, in: iconRect)
+        drawText(
+            "STATUS",
+            centerY: iconRect.midY,
+            x: rect.minX + 48,
+            width: 220,
+            size: 9.5,
+            weight: .semibold,
+            color: NSColor.white.withAlphaComponent(0.50),
+            tracking: 0.10
+        )
+        drawText(
+            snapshot.status,
+            rect: CGRect(x: rect.minX + 14, y: rect.minY + (rect.height - 22) / 2 + 12, width: rect.width - 28, height: 24),
+            size: 15,
+            weight: .medium,
+            color: NSColor.white.withAlphaComponent(0.82)
+        )
+    }
 
-        NSColor.white.withAlphaComponent(0.94).setStroke()
+    private func drawCardChrome(in rect: CGRect) {
+        let path = NSBezierPath(roundedRect: rect, xRadius: Metrics.cardRadius, yRadius: Metrics.cardRadius)
+        NSGradient(colors: [
+            NSColor.white.withAlphaComponent(0.058),
+            NSColor.white.withAlphaComponent(0.016)
+        ])?.draw(in: path, angle: -90)
+        NSColor.white.withAlphaComponent(0.09).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+
+    private func drawWindowIcon(_ icon: LimitIcon, in rect: CGRect) {
+        let tile = NSBezierPath(roundedRect: rect, xRadius: 8, yRadius: 8)
+        NSColor.white.withAlphaComponent(0.06).setFill()
+        tile.fill()
+        NSColor.white.withAlphaComponent(0.10).setStroke()
+        tile.lineWidth = 1
+        tile.stroke()
+
+        NSColor.white.withAlphaComponent(0.80).setStroke()
         switch icon {
         case .clock:
-            let dial = NSBezierPath(ovalIn: rect.insetBy(dx: 12, dy: 10))
-            dial.lineWidth = 2.2
+            let dial = NSBezierPath(ovalIn: rect.insetBy(dx: 7, dy: 7))
+            dial.lineWidth = 1.4
             dial.stroke()
             let center = CGPoint(x: rect.midX, y: rect.midY)
             let hands = NSBezierPath()
-            hands.lineWidth = 2.2
+            hands.lineWidth = 1.4
             hands.lineCapStyle = .round
             hands.move(to: center)
-            hands.line(to: CGPoint(x: center.x, y: center.y - 8))
+            hands.line(to: CGPoint(x: center.x, y: center.y - 4.5))
             hands.move(to: center)
-            hands.line(to: CGPoint(x: center.x + 8, y: center.y))
+            hands.line(to: CGPoint(x: center.x + 4.5, y: center.y))
             hands.stroke()
         case .calendar:
-            let cal = NSBezierPath(roundedRect: rect.insetBy(dx: 11, dy: 10), xRadius: 3, yRadius: 3)
-            cal.lineWidth = 2.2
-            cal.stroke()
+            let body = NSBezierPath(roundedRect: rect.insetBy(dx: 6.5, dy: 7), xRadius: 2.5, yRadius: 2.5)
+            body.lineWidth = 1.3
+            body.stroke()
             let top = NSBezierPath()
-            top.lineWidth = 2.2
-            top.move(to: CGPoint(x: rect.minX + 13, y: rect.minY + 20))
-            top.line(to: CGPoint(x: rect.maxX - 13, y: rect.minY + 20))
-            top.move(to: CGPoint(x: rect.minX + 18, y: rect.minY + 9))
-            top.line(to: CGPoint(x: rect.minX + 18, y: rect.minY + 15))
-            top.move(to: CGPoint(x: rect.maxX - 18, y: rect.minY + 9))
-            top.line(to: CGPoint(x: rect.maxX - 18, y: rect.minY + 15))
+            top.lineWidth = 1.3
+            top.move(to: CGPoint(x: rect.minX + 8, y: rect.minY + 12.5))
+            top.line(to: CGPoint(x: rect.maxX - 8, y: rect.minY + 12.5))
+            top.move(to: CGPoint(x: rect.minX + 11, y: rect.minY + 6.5))
+            top.line(to: CGPoint(x: rect.minX + 11, y: rect.minY + 9.5))
+            top.move(to: CGPoint(x: rect.maxX - 11, y: rect.minY + 6.5))
+            top.line(to: CGPoint(x: rect.maxX - 11, y: rect.minY + 9.5))
             top.stroke()
-            NSColor.white.withAlphaComponent(0.9).setFill()
+            NSColor.white.withAlphaComponent(0.65).setFill()
             for row in 0..<2 {
                 for col in 0..<3 {
-                    CGRect(x: rect.minX + 16 + CGFloat(col) * 6, y: rect.minY + 25 + CGFloat(row) * 6, width: 2.5, height: 2.5).fill()
+                    CGRect(
+                        x: rect.minX + 9.5 + CGFloat(col) * 3.6,
+                        y: rect.minY + 15 + CGFloat(row) * 3.6,
+                        width: 1.6,
+                        height: 1.6
+                    ).fill()
                 }
             }
         }
     }
 
-    static func windowHeight(cardCount: Int) -> CGFloat {
-        let contentCardCount = max(1, cardCount)
-        let cardTopY: CGFloat = 58
-        let cardHeight: CGFloat = 103.6
-        let cardVerticalStep: CGFloat = 117.6
-        let footerGap: CGFloat = 10
-        let footerHeight: CGFloat = 30
-        let footerBottomPadding: CGFloat = 10
+    private func drawFooter(above y: CGFloat) {
+        let divider = NSBezierPath()
+        divider.move(to: CGPoint(x: Metrics.sidePadding, y: y))
+        divider.line(to: CGPoint(x: bounds.width - Metrics.sidePadding, y: y))
+        NSColor.white.withAlphaComponent(0.07).setStroke()
+        divider.lineWidth = 1
+        divider.stroke()
 
-        return cardTopY
-            + CGFloat(contentCardCount - 1) * cardVerticalStep
-            + cardHeight
-            + footerGap
-            + footerHeight
-            + footerBottomPadding
-    }
-
-    private func drawFooter(y footerY: CGFloat) {
+        let credits = snapshot.resetCredits.map { "reset credits \($0)" } ?? "reset credits -"
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
-        let updated = formatter.string(from: snapshot.updatedAt)
-        let credits = snapshot.resetCredits.map { "reset credits \($0)" } ?? "reset credits -"
-        let footerRect = CGRect(x: 18, y: footerY, width: bounds.width - 36, height: footerHeight)
-        let footerPath = NSBezierPath(roundedRect: footerRect, xRadius: 10, yRadius: 10)
-        NSColor(calibratedRed: 0.76, green: 0.82, blue: 1.0, alpha: 0.32).setFill()
-        footerPath.fill()
-        NSColor(calibratedWhite: 1.0, alpha: 0.42).setStroke()
-        footerPath.lineWidth = 1
-        footerPath.stroke()
 
-        let footerTextY = footerRect.minY + (footerRect.height - 14) / 2
         drawText(
             credits,
-            rect: CGRect(x: footerRect.minX + 24, y: footerTextY, width: 142, height: 14),
-            size: 12,
+            rect: CGRect(x: Metrics.sidePadding, y: y + 9, width: 220, height: 15),
+            size: 10.5,
             weight: .medium,
-            color: NSColor(calibratedRed: 0.18, green: 0.22, blue: 0.62, alpha: 1)
+            color: NSColor.white.withAlphaComponent(0.42)
         )
-
         drawText(
-            "•  updated \(updated)",
-            rect: CGRect(x: footerRect.minX + 178, y: footerTextY, width: footerRect.width - 196, height: 14),
-            size: 12,
+            "updated \(formatter.string(from: snapshot.updatedAt))",
+            rect: CGRect(x: bounds.width - 240 - Metrics.sidePadding, y: y + 9, width: 240, height: 15),
+            size: 10.5,
             weight: .medium,
-            color: NSColor(calibratedRed: 0.18, green: 0.22, blue: 0.62, alpha: 1)
+            color: NSColor.white.withAlphaComponent(0.42),
+            alignment: .right,
+            monospaced: true
         )
     }
 
@@ -723,22 +1148,128 @@ final class UsageView: NSView {
         return "reset at \(formatter.string(from: date))"
     }
 
+    // MARK: - Text helpers
+
+    private func font(size: CGFloat, weight: NSFont.Weight, monospaced: Bool) -> NSFont {
+        monospaced
+            ? NSFont.monospacedDigitSystemFont(ofSize: size, weight: weight)
+            : NSFont.systemFont(ofSize: size, weight: weight)
+    }
+
+    private func attributes(
+        size: CGFloat,
+        weight: NSFont.Weight,
+        color: NSColor,
+        alignment: NSTextAlignment,
+        tracking: CGFloat,
+        monospaced: Bool
+    ) -> [NSAttributedString.Key: Any] {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = alignment
+        paragraph.lineBreakMode = .byTruncatingTail
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: font(size: size, weight: weight, monospaced: monospaced),
+            .foregroundColor: color,
+            .paragraphStyle: paragraph
+        ]
+        if tracking != 0 {
+            attributes[.kern] = tracking
+        }
+        return attributes
+    }
+
+    private func textWidth(
+        _ text: String,
+        size: CGFloat,
+        weight: NSFont.Weight,
+        tracking: CGFloat = 0,
+        monospaced: Bool = false
+    ) -> CGFloat {
+        let attributes = attributes(
+            size: size,
+            weight: weight,
+            color: .white,
+            alignment: .left,
+            tracking: tracking,
+            monospaced: monospaced
+        )
+        return ceil((text as NSString).size(withAttributes: attributes).width)
+    }
+
+    private func drawText(
+        _ text: String,
+        centerY: CGFloat,
+        x: CGFloat,
+        width: CGFloat,
+        size: CGFloat,
+        weight: NSFont.Weight,
+        color: NSColor,
+        alignment: NSTextAlignment = .left,
+        tracking: CGFloat = 0,
+        monospaced: Bool = false
+    ) {
+        let lineFont = font(size: size, weight: weight, monospaced: monospaced)
+        let lineHeight = lineFont.ascender - lineFont.descender
+        drawText(
+            text,
+            rect: CGRect(x: x, y: centerY - lineHeight / 2, width: width, height: lineHeight),
+            size: size,
+            weight: weight,
+            color: color,
+            alignment: alignment,
+            tracking: tracking,
+            monospaced: monospaced
+        )
+    }
+
+    private func drawText(
+        _ text: String,
+        baselineY: CGFloat,
+        x: CGFloat,
+        width: CGFloat,
+        size: CGFloat,
+        weight: NSFont.Weight,
+        color: NSColor,
+        alignment: NSTextAlignment = .left,
+        tracking: CGFloat = 0,
+        monospaced: Bool = false
+    ) {
+        let lineFont = font(size: size, weight: weight, monospaced: monospaced)
+        drawText(
+            text,
+            rect: CGRect(
+                x: x,
+                y: baselineY - lineFont.ascender,
+                width: width,
+                height: lineFont.ascender - lineFont.descender
+            ),
+            size: size,
+            weight: weight,
+            color: color,
+            alignment: alignment,
+            tracking: tracking,
+            monospaced: monospaced
+        )
+    }
+
     private func drawText(
         _ text: String,
         rect: CGRect,
         size: CGFloat,
         weight: NSFont.Weight,
         color: NSColor,
-        alignment: NSTextAlignment = .left
+        alignment: NSTextAlignment = .left,
+        tracking: CGFloat = 0,
+        monospaced: Bool = false
     ) {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = alignment
-        paragraph.lineBreakMode = .byTruncatingTail
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: size, weight: weight),
-            .foregroundColor: color,
-            .paragraphStyle: paragraph
-        ]
+        let attributes = attributes(
+            size: size,
+            weight: weight,
+            color: color,
+            alignment: alignment,
+            tracking: tracking,
+            monospaced: monospaced
+        )
         text.draw(in: rect, withAttributes: attributes)
     }
 }
@@ -1134,16 +1665,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.hideWindow()
         }
 
-        let visualEffectView = NSVisualEffectView(frame: CGRect(origin: .zero, size: windowSize))
-        visualEffectView.autoresizingMask = [.width, .height]
-        visualEffectView.blendingMode = .withinWindow
-        visualEffectView.material = .popover
-        visualEffectView.state = .active
-        visualEffectView.wantsLayer = true
-        visualEffectView.layer?.cornerRadius = 18
-        visualEffectView.layer?.masksToBounds = true
-        visualEffectView.layer?.backgroundColor = NSColor(calibratedWhite: 1.0, alpha: 0.16).cgColor
-        visualEffectView.addSubview(usageView)
+        // A plain container: the panel draws its own rounded shape. A behind-window
+        // NSVisualEffectView would fill the whole rectangular window with blur, which
+        // shows up as square, semi-transparent corners outside the rounded panel.
+        let container = NSView(frame: CGRect(origin: .zero, size: windowSize))
+        container.autoresizingMask = [.width, .height]
+        container.wantsLayer = true
+        container.addSubview(usageView)
 
         window = NSWindow(
             contentRect: CGRect(origin: .zero, size: windowSize),
@@ -1152,7 +1680,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         window.title = "Codex Usage"
-        window.contentView = visualEffectView
+        window.contentView = container
         window.isMovableByWindowBackground = true
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -1162,11 +1690,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.isReleasedWhenClosed = false
         window.delegate = self
 
-        if let screen = NSScreen.main?.visibleFrame {
-            let x = screen.maxX - window.frame.width - 24
-            let y = screen.maxY - window.frame.height - 24
-            window.setFrameOrigin(CGPoint(x: x, y: y))
-        }
+        positionWindow()
         window.makeKeyAndOrderFront(nil)
         setupStatusItem()
         setupNotifications()
@@ -1372,6 +1896,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func screenParametersDidChange() {
         applyStatusItem(snapshot: latestSnapshot)
+        if window?.isVisible == true {
+            positionWindow()
+        }
+    }
+
+    private func positionWindow() {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        let visible = screen.visibleFrame
+        let x = visible.maxX - window.frame.width - 24
+        let y = visible.maxY - window.frame.height - 24
+        window.setFrameOrigin(CGPoint(x: x, y: y))
     }
 
     private func resizeWindow(for snapshot: UsageSnapshot) {
@@ -1399,11 +1934,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showWindow() {
-        if let screen = NSScreen.main?.visibleFrame {
-            let x = screen.maxX - window.frame.width - 24
-            let y = screen.maxY - window.frame.height - 24
-            window.setFrameOrigin(CGPoint(x: x, y: y))
-        }
+        positionWindow()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codex Usage Float · 容量条动效设计</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 64px 40px 80px;
+    background:
+      radial-gradient(900px 520px at 12% -8%, rgba(96,120,255,.30), rgba(96,120,255,0) 62%),
+      radial-gradient(760px 460px at 92% 6%, rgba(46,214,255,.16), rgba(46,214,255,0) 60%),
+      #070a12;
+    color: #e8eeff;
+    font: 14px/1.65 -apple-system, "SF Pro Text", "Helvetica Neue", "PingFang SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  .eyebrow { font: 600 11px/1 ui-monospace, monospace; letter-spacing: .16em; text-transform: uppercase; color: #7f8fc4; }
+  h1 { margin: 14px 0 12px; font-size: 34px; line-height: 1.18; font-weight: 650; letter-spacing: -.02em; }
+  h1 em { font-style: normal; background: linear-gradient(92deg, #8dffce, #56c8ff 42%, #ffb347 74%, #ff5a4a); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { margin: 0; max-width: 680px; color: #a7b3d6; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 40px; }
+  .card {
+    padding: 24px 24px 20px; border-radius: 20px;
+    background: linear-gradient(180deg, rgba(255,255,255,.075), rgba(255,255,255,.028));
+    border: 1px solid rgba(159,182,255,.16);
+    box-shadow: 0 24px 60px -34px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.10);
+  }
+  .tier { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  h2 { margin: 0; font-size: 16px; font-weight: 620; letter-spacing: -.01em; }
+  .pill { font: 600 10px/1 ui-monospace, monospace; color: #0b1020; padding: 6px 9px; border-radius: 999px; background: #cfdaff; white-space: nowrap; }
+  .card p { margin: 10px 0 20px; color: #9fb0d8; font-size: 12.5px; }
+  .stage {
+    padding: 16px 14px; border-radius: 14px;
+    background: radial-gradient(120% 170% at 50% 0%, rgba(120,150,255,.16), rgba(8,12,24,.55) 72%);
+    border: 1px solid rgba(150,175,255,.12);
+  }
+  .stage img { display: block; width: 100%; height: auto; }
+  .meta { margin-top: 14px; font: 11px/1.6 ui-monospace, Menlo, monospace; color: #7183ac; }
+  footer { margin-top: 48px; color: #7b89af; font-size: 12.5px; border-top: 1px solid rgba(150,175,255,.14); padding-top: 20px; }
+  footer code { font-family: ui-monospace, Menlo, monospace; color: #b9c7ef; }
+</style></head>
+<body><div class="wrap">
+  <div class="eyebrow">Codex Usage Float · capacity bar motion</div>
+  <h1>四种余量，四种<em>呼吸方式</em></h1>
+  <p class="lede">同一根“液态玻璃管”，用四种完全不同的运动语义表达余量：漂移、流动、呼吸、扫描。阈值判断、拖拽预览、减少动态效果与所有数值文案都保持不变，只有动画本身被重新设计。</p>
+  <div class="grid">
+    <article class="card">
+      <div class="tier"><h2>Aurora Drift</h2><span class="pill">≥ 70%</span></div>
+      <p>两道光带以 15s / 21s 的节奏缓慢反向漂移。没有硬边，也没有节拍，只是“还很多”的安定感。</p>
+      <div class="stage"><img src="aurora.svg" width="412" height="26" alt="Aurora Drift，82% 剩余"></div>
+      <div class="meta">光带 15s / 21s · 余量 82%</div>
+    </article>
+    <article class="card">
+      <div class="tier"><h2>Ribbon Flow</h2><span class="pill">40–69%</span></div>
+      <p>斜向细光带每 1.7 秒前进一个周期，持续流向额度剩余端；叠加一道 3.4 秒的窄高光，读起来像“正在被稳定用掉”。</p>
+      <div class="stage"><img src="ribbon.svg" width="412" height="26" alt="Ribbon Flow，56% 剩余"></div>
+      <div class="meta">光带 1.7s · 高光 3.4s · 余量 56%</div>
+    </article>
+    <article class="card">
+      <div class="tier"><h2>Ember Pulse</h2><span class="pill">10–39%</span></div>
+      <p>没有了流动，只剩端点一团暖光按 2.4 秒胀缩，暖色洗光以 4.6 秒轻微浮动，像炭火将熄未熄。</p>
+      <div class="stage"><img src="ember.svg" width="412" height="26" alt="Ember Pulse，28% 剩余"></div>
+      <div class="meta">呼吸 2.4s · 暖光 4.6s · 余量 28%</div>
+    </article>
+    <article class="card">
+      <div class="tier"><h2>Beacon Scan</h2><span class="pill">< 10%</span></div>
+      <p>一条细扫描光每 1.7 秒掠过整条轨道，填充边缘按“两短一停”双拍闪动。机械、明确，但不整条闪，不刺眼。</p>
+      <div class="stage"><img src="beacon.svg" width="412" height="26" alt="Beacon Scan，9% 剩余"></div>
+      <div class="meta">扫描 1.7s · 双拍 1.7s · 余量 9%</div>
+    </article>
+  </div>
+  <footer>
+    设计稿：<code>design/progress-bar/*.svg</code>（纯 SVG + CSS 动画，浏览器打开即循环播放）。App 内是等参数的 Core Animation 实现；系统开启“减少动态效果”或窗口不可见时停止运动、保留配色。
+  </footer>
+</div></body></html>
