@@ -38,9 +38,25 @@ The script compiles `CodexUsageFloat.swift`, builds `CodexUsageFloat.app`, copie
 
 This installs `~/Library/LaunchAgents/local.codex.usagefloat.plist`. The LaunchAgent waits 20 seconds after login, checks whether the app is already running, and opens the local app bundle when needed.
 
+## App Icon
+
+The icon is a reproducible vector asset:
+
+- `Resources/AppIcon.svg` — 1024 master (824 squircle on a 1024 canvas with a 100 px transparent margin)
+- `Resources/AppIcon-small.svg` — simplified art for the 16/32 px slots (thicker ring, larger quota bars, no dashes or glow)
+- `Resources/AppIcon.icns` — the icon packaged into the app bundle
+
+Regenerate after editing the SVG:
+
+```bash
+./tools/build-icon.sh
+```
+
+The script rasterises the SVG at 1024 with Chrome (or `rsvg-convert`), then builds every size with `sips` and packs the `.icns` with `iconutil`. If Finder keeps showing the old icon, `touch CodexUsageFloat.app` and reopen the window; `killall Finder` as a last resort.
+
 ## UI Behavior
 
-- Continuous usage bars change with remaining quota: green at 70–100% (swaying leaves), blue at 40–69% (water), yellow at 10–39% (sunset), and red below 10% (slow warning blink, including at 0%). Animations stop when the window is hidden or macOS Reduce Motion is enabled.
+- Continuous usage bars change with remaining quota, and each tier has its own motion: green at 70–100% (two caustic bands drifting slowly in opposite directions), blue at 40–69% (thin diagonal ribbons flowing towards the remaining end), amber at 10–39% (a warm bloom breathing at the tip), and red below 10% (a narrow scan beam sweeping the trough while the fill rim double-beats; 0% is still reported). Colours stay when the window is hidden or macOS Reduce Motion is enabled; the motion stops.
 - Drag the invisible handle at the right end of a filled bar to preview its colors and animations. Releasing it returns to the latest real quota; the preview never changes usage data or triggers reset notifications.
 - Click the red dot to quit.
 - Click the yellow dot to hide the floating window.
@@ -55,11 +71,14 @@ The app starts a local `codex app-server --stdio` child process and calls `accou
 ## Project Layout
 
 ```text
-CodexUsageFloat.swift  AppKit source
-Info.plist             App bundle metadata
-Resources/             Icons and logo assets copied into the app bundle
-run.sh                 Build and run locally
-start-on-login.sh      Install the LaunchAgent
+CodexUsageFloat.swift       AppKit source
+Info.plist                  App bundle metadata
+Resources/                  Icons and logo assets copied into the app bundle
+design/progress-bar/        SVG motion prototypes and a browser preview of the four tiers
+Resources/AppIcon.svg       App icon master (vector)
+tools/build-icon.sh         Rebuild AppIcon.icns from the SVG
+run.sh                      Build and run locally
+start-on-login.sh           Install the LaunchAgent
 ```
 
 ## License

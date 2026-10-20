@@ -16,4 +16,9 @@ cp "$ROOT/Resources/codex-logo.png" "$APP_RESOURCES/codex-logo.png"
 cp "$ROOT/Resources/AppIcon.icns" "$APP_RESOURCES/AppIcon.icns"
 cp "$ROOT/Resources/codex_logo.svg" "$APP_RESOURCES/codex_logo.svg"
 cp "$ROOT/Resources/openai-codex-seeklogo.svg" "$APP_RESOURCES/openai-codex-seeklogo.svg"
+
+# Replacing resources invalidates the linker's ad-hoc signature; macOS then SIGKILLs
+# the app on launch ("cs_invalid_page"). Re-sign the bundle after every build.
+codesign --force --sign - "$ROOT/CodexUsageFloat.app"
+
 open -n "$ROOT/CodexUsageFloat.app"
