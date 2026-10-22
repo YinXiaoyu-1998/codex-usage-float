@@ -614,6 +614,7 @@ final class FlowProgressView: NSView {
     private func stopAnimations() {
         let layers: [CALayer] = [causticA, causticB, stripes, sheenLayer, warmWash, bloom, rim]
         for layer in layers { layer.removeAllAnimations() }
+        layer?.removeAnimation(forKey: "alert")
         layer?.opacity = 1
         rim.opacity = 1
         bloom.opacity = 1
