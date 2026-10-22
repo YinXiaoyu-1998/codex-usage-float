@@ -43,7 +43,7 @@ private extension NSColor {
 /// - meadow (>= 70%): two wide caustic bands drifting slowly in opposite directions
 /// - water (40-69%): thin diagonal ribbons flowing towards the tip
 /// - sunset (10-39%): a warm bloom breathing at the tip
-/// - danger (< 10%): a scan beam sweeping the trough with a double-beat rim
+/// - danger (< 10%): the whole bar breathing a slow red pulse
 ///
 /// Every tier shares the same glass body, gloss and colour grammar.
 /// The drag handle at the fill end stays invisible; there is no bead or marker drawn there.
@@ -116,10 +116,6 @@ final class FlowProgressView: NSView {
     private let trackTopShadow = CAGradientLayer()
     private let trackBottomLine = CALayer()
     private let trackBorder = CAShapeLayer()
-    private let scanHost = CALayer()
-    private let scanTail = CAGradientLayer()
-    private let scanLine = CALayer()
-
     // Fill.
     private let fillClip = CALayer()
     private let baseGradient = CAGradientLayer()
@@ -207,23 +203,6 @@ final class FlowProgressView: NSView {
 
         trackBottomLine.backgroundColor = NSColor.white.withAlphaComponent(0.05).cgColor
         layer?.addSublayer(trackBottomLine)
-
-        scanHost.masksToBounds = true
-        scanHost.opacity = 0
-        scanHost.isHidden = true
-        layer?.addSublayer(scanHost)
-        scanTail.colors = [
-            NSColor(hex: 0xFFB3A8, alpha: 0).cgColor,
-            NSColor(hex: 0xFFB3A8, alpha: 0.10).cgColor,
-            NSColor(hex: 0xFFD9D2, alpha: 0.30).cgColor,
-            NSColor(hex: 0xFFF4F1, alpha: 0.50).cgColor
-        ]
-        scanTail.locations = [0, 0.62, 0.90, 1]
-        scanTail.startPoint = CGPoint(x: 0, y: 0.5)
-        scanTail.endPoint = CGPoint(x: 1, y: 0.5)
-        scanHost.addSublayer(scanTail)
-        scanLine.backgroundColor = NSColor(hex: 0xFFF4F1, alpha: 0.8).cgColor
-        scanHost.addSublayer(scanLine)
 
         fillClip.masksToBounds = true
         layer?.addSublayer(fillClip)
@@ -451,13 +430,6 @@ final class FlowProgressView: NSView {
             cornerWidth: height / 2 - 0.5, cornerHeight: height / 2 - 0.5, transform: nil
         )
 
-        scanHost.bounds = CGRect(x: 0, y: 0, width: 30, height: height)
-        if scanHost.animation(forKey: "scan") == nil {
-            scanHost.position = CGPoint(x: -60, y: height / 2)
-        }
-        scanTail.frame = CGRect(x: 0, y: 1.5, width: 26, height: height - 3)
-        scanLine.frame = CGRect(x: 24.2, y: 2.5, width: 1.8, height: height - 5)
-
         fillClip.frame = CGRect(x: 0, y: 0, width: fillWidth, height: height)
         fillClip.cornerRadius = min(height / 2, fillWidth / 2)
         baseGradient.frame = fillClip.bounds
@@ -543,9 +515,7 @@ final class FlowProgressView: NSView {
         stripes.isHidden = !(visible && mood == .water)
         sheenLayer.isHidden = !(visible && mood == .water)
         warmWash.isHidden = !(visible && mood == .sunset)
-        bloom.isHidden = !(visible && mood == .sunset)
-        scanHost.isHidden = !(visible && mood == .danger)
-    }
+        bloom.isHidden = !(visible && mood == .sunset)    }
 
     private func startAnimations(for mood: Mood) {
         let width = bounds.width
@@ -561,8 +531,7 @@ final class FlowProgressView: NSView {
             addBloomPulse()
             addWarmShift()
         case .danger:
-            addScanSweep()
-            addAlertBeat()
+            addAlertPulse()
         }
     }
 
@@ -629,40 +598,23 @@ final class FlowProgressView: NSView {
         warmWash.add(group, forKey: "warm")
     }
 
-    private func addScanSweep() {
-        guard scanHost.animation(forKey: "scan") == nil else { return }
-        let width = bounds.width
-        let sweep = CAKeyframeAnimation(keyPath: "position.x")
-        sweep.values = [-80, width + 60, width + 60]
-        sweep.keyTimes = [0, 0.64, 1]
-        sweep.duration = 1.7
-        sweep.repeatCount = .infinity
-        sweep.timingFunction = CAMediaTimingFunction(controlPoints: 0.45, 0, 0.55, 1)
-        scanHost.add(sweep, forKey: "scan")
-
-        let fade = CAKeyframeAnimation(keyPath: "opacity")
-        fade.values = [0, 1, 1, 0, 0]
-        fade.keyTimes = [0, 0.1, 0.64, 0.76, 1]
-        fade.duration = 1.7
-        fade.repeatCount = .infinity
-        scanHost.add(fade, forKey: "scanFade")
-    }
-
-    private func addAlertBeat() {
-        guard rim.animation(forKey: "beat") == nil else { return }
-        let beat = CAKeyframeAnimation(keyPath: "opacity")
-        beat.values = [1, 0.14, 1, 0.14, 1, 1]
-        beat.keyTimes = [0, 0.07, 0.15, 0.23, 0.36, 1]
-        beat.duration = 1.7
-        beat.repeatCount = .infinity
-        beat.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        rim.add(beat, forKey: "beat")
+    private func addAlertPulse() {
+        // Warn by breathing the whole bar, like the original low-quota blink.
+        guard let layer, layer.animation(forKey: "alert") == nil else { return }
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 0.55
+        pulse.toValue = 1.0
+        pulse.duration = 0.95
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(pulse, forKey: "alert")
     }
 
     private func stopAnimations() {
-        let layers: [CALayer] = [causticA, causticB, stripes, sheenLayer, warmWash, bloom, scanHost, rim]
+        let layers: [CALayer] = [causticA, causticB, stripes, sheenLayer, warmWash, bloom, rim]
         for layer in layers { layer.removeAllAnimations() }
-        scanHost.opacity = 0
+        layer?.opacity = 1
         rim.opacity = 1
         bloom.opacity = 1
         warmWash.opacity = 1

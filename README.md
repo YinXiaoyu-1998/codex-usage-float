@@ -56,7 +56,7 @@ The script rasterises the SVG at 1024 with Chrome (or `rsvg-convert`), then buil
 
 ## UI Behavior
 
-- Continuous usage bars change with remaining quota, and each tier has its own motion: green at 70–100% (two caustic bands drifting slowly in opposite directions), blue at 40–69% (thin diagonal ribbons flowing towards the remaining end), amber at 10–39% (a warm bloom breathing at the tip), and red below 10% (a narrow scan beam sweeping the trough while the fill rim double-beats; 0% is still reported). Colours stay when the window is hidden or macOS Reduce Motion is enabled; the motion stops.
+- Continuous usage bars change with remaining quota, and each tier has its own motion: green at 70–100% (two caustic bands drifting slowly in opposite directions), blue at 40–69% (thin diagonal ribbons flowing towards the remaining end), amber at 10–39% (a warm bloom breathing at the tip), and red below 10% (the whole bar breathing a slow red pulse; 0% is still reported). Colours stay when the window is hidden or macOS Reduce Motion is enabled; the motion stops.
 - Drag the invisible handle at the right end of a filled bar to preview its colors and animations. Releasing it returns to the latest real quota; the preview never changes usage data or triggers reset notifications.
 - Click the red dot to quit.
 - Click the yellow dot to hide the floating window.
