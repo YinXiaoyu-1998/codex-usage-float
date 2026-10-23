@@ -40,7 +40,7 @@
 ./start-on-login.sh
 ```
 
-这个脚本会安装 `~/Library/LaunchAgents/local.codex.usagefloat.plist`。LaunchAgent 会在登录后等待 20 秒，检查程序是否已经运行，如果没有就打开本地 app bundle。
+先将构建好的 `CodexUsageFloat.app` 安装到 `/Applications`。脚本会安装 `~/Library/LaunchAgents/local.codex.usagefloat.plist`，登录后等待 20 秒，按安装版可执行文件的完整路径检查进程，必要时打开 `/Applications/CodexUsageFloat.app`。开机启动不再依赖仓库目录，日志保存在 `~/Library/Logs/CodexUsageFloat/`。
 
 ## 应用图标
 

@@ -40,7 +40,7 @@ Use `./run.sh --build-only` to build without launching. Run `./tools/test.sh` fo
 ./start-on-login.sh
 ```
 
-This installs `~/Library/LaunchAgents/local.codex.usagefloat.plist`. The LaunchAgent waits 20 seconds after login, checks whether the app is already running, and opens the local app bundle when needed.
+First install the built `CodexUsageFloat.app` in `/Applications`. This script installs `~/Library/LaunchAgents/local.codex.usagefloat.plist`. The LaunchAgent waits 20 seconds after login, checks the installed executable's exact path, and opens `/Applications/CodexUsageFloat.app` when needed. It does not depend on the repository checkout; logs are stored in `~/Library/Logs/CodexUsageFloat/`.
 
 ## App Icon
 
