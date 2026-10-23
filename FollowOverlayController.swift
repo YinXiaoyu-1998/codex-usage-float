@@ -115,18 +115,18 @@ final class FollowOverlayController {
 
     private func makeRows() -> [FollowOverlayRow] {
         guard let snapshot else {
-            return [FollowOverlayRow(text: "额度连接中…", remainingPercent: nil)]
+            return [FollowOverlayRow(text: "Connecting...", remainingPercent: nil)]
         }
         var rows: [FollowOverlayRow] = []
         if let weekly = snapshot.weekly {
-            rows.append(FollowOverlayRow(text: "周剩余 \(weekly.remainingPercent)%", remainingPercent: weekly.remainingPercent))
+            rows.append(FollowOverlayRow(text: "Weekly \(weekly.remainingPercent)% left", remainingPercent: weekly.remainingPercent))
         }
         if let fiveHour = snapshot.fiveHour {
-            rows.append(FollowOverlayRow(text: "5h 剩余 \(fiveHour.remainingPercent)%", remainingPercent: fiveHour.remainingPercent))
+            rows.append(FollowOverlayRow(text: "5H \(fiveHour.remainingPercent)% left", remainingPercent: fiveHour.remainingPercent))
         }
         if rows.isEmpty {
             let connecting = snapshot.status == "Connecting..."
-            rows.append(FollowOverlayRow(text: connecting ? "额度连接中…" : "额度暂不可用", remainingPercent: nil))
+            rows.append(FollowOverlayRow(text: connecting ? "Connecting..." : "Usage unavailable", remainingPercent: nil))
         }
         return rows
     }
