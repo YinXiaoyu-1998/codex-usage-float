@@ -102,11 +102,11 @@ final class FollowOverlayController {
 
         let rows = makeRows()
         let size = CGSize(width: 140, height: CGFloat(rows.count) * 21 + 16)
-        // Screenshot anchor: just right of the app title in the upper-left area.
+        // Align the first quota line with the Codex title, just to its right.
         // Keep the same offset when the sidebar collapses or the window resizes.
         let frame = CGRect(
             x: target.minX + 140,
-            y: environment.desktopTop - target.minY - 48 - size.height,
+            y: environment.desktopTop - target.minY - 53 - size.height,
             width: size.width, height: size.height
         )
         tracker.setContinuousTracking(true)
