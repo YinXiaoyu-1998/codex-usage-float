@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="412" height="26" viewBox="0 0 412 26" role="img" aria-labelledby="title desc">
+  <title id="title">Aurora Drift — 82% remaining</title>
+  <desc id="desc">≥ 70% · 光带漂移 15s / 21s</desc>
+  <defs>
+    <linearGradient id="track" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0c1628"/>
+      <stop offset="1" stop-color="#060a14"/>
+    </linearGradient>
+    <linearGradient id="fill" x1="0" y1="0" x2="0.18" y2="1">
+      <stop offset="0" stop-color="#8dffce"/>
+      <stop offset="0.34" stop-color="#2ee08a"/>
+      <stop offset="0.72" stop-color="#14b06d"/>
+      <stop offset="1" stop-color="#0a7c46"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.26"/>
+      <stop offset="0.24" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="0.7" stop-color="#000000" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.24"/>
+    </linearGradient>
+    <linearGradient id="leftShade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000000" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="sheenGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="fillClip"><rect width="337.84" height="26" rx="13"/></clipPath>
+    <clipPath id="trackClip"><rect x="1" y="1" width="410" height="24" rx="12"/></clipPath>
+    <linearGradient id="caustic" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e9fff6" stop-opacity="0"/>
+      <stop offset="0.42" stop-color="#e9fff6" stop-opacity="0.34"/>
+      <stop offset="0.62" stop-color="#ffffff" stop-opacity="0.40"/>
+      <stop offset="1" stop-color="#c9ffe7" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="causticSoft" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d8fff0" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#d8fff0" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#d8fff0" stop-opacity="0"/>
+    </linearGradient>
+    <style>
+      @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+    .bandA { animation: driftA 15s ease-in-out infinite alternate -3.4s; }
+    .bandB { animation: driftB 21s ease-in-out infinite alternate -7.2s; }
+    @keyframes driftA { from { transform: translate(-150px, 1px); } to { transform: translate(356px, -2px); } }
+    @keyframes driftB { from { transform: translate(300px, -1px); } to { transform: translate(-120px, 2px); } }
+    </style>
+  </defs>
+
+  <!-- track -->
+  <rect x="0.5" y="0.5" width="411" height="25" rx="12.5" fill="url(#track)"/>
+  <path d="M3.5 2.2 H408.5" stroke="#000000" stroke-opacity="0.5" stroke-width="1.4" stroke-linecap="round"/>
+  <path d="M4 24.3 H408" stroke="#ffffff" stroke-opacity="0.05" stroke-width="1.2" stroke-linecap="round"/>
+  <rect x="0.5" y="0.5" width="411" height="25" rx="12.5" fill="none" stroke="#b9c8ff" stroke-opacity="0.13"/>
+  
+
+  <!-- fill -->
+  <g clip-path="url(#fillClip)">
+    <rect width="337.84" height="26" fill="url(#fill)"/>
+    <g class="bandB" opacity="0.9">
+      <rect x="-72" y="-14" width="112" height="54" fill="url(#causticSoft)" transform="rotate(-14 0 13)"/>
+    </g>
+    <g class="bandA" opacity="0.85">
+      <rect x="-40" y="-12" width="64" height="50" fill="url(#caustic)" transform="rotate(-11 0 13)"/>
+    </g>
+    <rect width="337.84" height="26" fill="url(#gloss)"/>
+    <rect width="14" height="26" fill="url(#leftShade)"/>
+    <rect x="0.5" y="0.5" width="336.84" height="25" rx="12.5" fill="none" stroke="#b9ffdc" stroke-opacity="0.24"/>
+  </g>
+
+  <!-- glass edge -->
+  <rect x="0.5" y="0.5" width="411" height="25" rx="12.5" fill="none" stroke="#ffffff" stroke-opacity="0.09"/>
+</svg>

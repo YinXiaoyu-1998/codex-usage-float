@@ -38,8 +38,26 @@
 
 这个脚本会安装 `~/Library/LaunchAgents/local.codex.usagefloat.plist`。LaunchAgent 会在登录后等待 20 秒，检查程序是否已经运行，如果没有就打开本地 app bundle。
 
+## 应用图标
+
+图标是可复现的矢量资产：
+
+- `Resources/AppIcon.svg` — 1024 母版（824 圆角方块 + 100 透明留边）
+- `Resources/AppIcon-small.svg` — 16/32px 专用简化版（更粗的环、更大的用量条、去掉虚线与辉光）
+- `Resources/AppIcon.icns` — 打包进 app bundle 的最终图标
+
+改完 SVG 后重新生成：
+
+```bash
+./tools/build-icon.sh
+```
+
+脚本用 Chrome（或 `rsvg-convert`）把 SVG 栅格化到 1024，再用 `sips` 生成各尺寸、`iconutil` 打成 `.icns`。Finder 若仍显示旧图标，先 `touch CodexUsageFloat.app` 并重开窗口，必要时再 `killall Finder`。
+
 ## 使用方式
 
+- 连续进度条随余量变化，四档各有一种动效：70–100% 绿色「极光漂移」（两道光带缓慢反向漂移）、40–69% 蓝色「光带流动」（斜向细光带匀速流向额度剩余端）、10–39% 橙色「余烬呼吸」（端点暖光缓慢胀缩）、低于 10% 红色「低位呼吸」（整条容量条以约 1 秒的节奏缓慢闪烁，0% 也提示）。隐藏窗口或开启 macOS“减少动态效果”时保留配色、停止运动。
+- 按住彩色条右端的隐形手柄左右拖动，可预览不同余量的颜色与动画；松开后回到最新真实余量。预览不会修改用量数据或触发额度刷新通知。
 - 点红色圆点退出。
 - 点黄色圆点隐藏浮窗。
 - 点菜单栏 item 显示或隐藏浮窗。
@@ -53,11 +71,14 @@
 ## 项目结构
 
 ```text
-CodexUsageFloat.swift  AppKit 源码
-Info.plist             app bundle 元数据
-Resources/             打包进 app bundle 的图标和 logo 资源
-run.sh                 本地构建并运行
-start-on-login.sh      安装 LaunchAgent
+CodexUsageFloat.swift    AppKit 源码
+Info.plist               app bundle 元数据
+Resources/               打包进 app bundle 的图标和 logo 资源
+design/progress-bar/     四档动效的 SVG 设计稿与浏览器预览页
+Resources/AppIcon.svg    应用图标母版（矢量）
+tools/build-icon.sh      从 SVG 重新生成 AppIcon.icns
+run.sh                   本地构建并运行
+start-on-login.sh        安装 LaunchAgent
 ```
 
 ## License

@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="412" height="26" viewBox="0 0 412 26" role="img" aria-labelledby="title desc">
+  <title id="title">Beacon Pulse — 9% remaining</title>
+  <desc id="desc">低于 10% · 红色呼吸闪烁 0.95s · 无流光</desc>
+  <defs>
+    <linearGradient id="track" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0c1628"/>
+      <stop offset="1" stop-color="#060a14"/>
+    </linearGradient>
+    <linearGradient id="fill" x1="0" y1="0" x2="0.18" y2="1">
+      <stop offset="0" stop-color="#ff9a86"/>
+      <stop offset="0.34" stop-color="#ef4444"/>
+      <stop offset="0.72" stop-color="#b91c1c"/>
+      <stop offset="1" stop-color="#5f0d0d"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.26"/>
+      <stop offset="0.24" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="0.7" stop-color="#000000" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.24"/>
+    </linearGradient>
+    <linearGradient id="leftShade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#000000" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="fillClip"><rect width="37.08" height="26" rx="13"/></clipPath>
+    <style>
+      @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+      .alert { animation: alertPulse 0.95s ease-in-out infinite alternate; }
+      @keyframes alertPulse { from { opacity: 0.55; } to { opacity: 1; } }
+    </style>
+  </defs>
+
+  <g class="alert">
+    <!-- track -->
+    <rect x="0.5" y="0.5" width="411" height="25" rx="12.5" fill="url(#track)"/>
+    <path d="M3.5 2.2 H408.5" stroke="#000000" stroke-opacity="0.5" stroke-width="1.4" stroke-linecap="round"/>
+    <path d="M4 24.3 H408" stroke="#ffffff" stroke-opacity="0.05" stroke-width="1.2" stroke-linecap="round"/>
+    <rect x="0.5" y="0.5" width="411" height="25" rx="12.5" fill="none" stroke="#b9c8ff" stroke-opacity="0.13"/>
+
+    <!-- fill -->
+    <g clip-path="url(#fillClip)">
+      <rect width="37.08" height="26" fill="url(#fill)"/>
+      <rect width="37.08" height="26" fill="url(#gloss)"/>
+      <rect width="14" height="26" fill="url(#leftShade)"/>
+      <rect x="0.5" y="0.5" width="36.08" height="25" rx="12.5" fill="none" stroke="#ffc6bb" stroke-opacity="0.55"/>
+    </g>
+  </g>
+
+  <!-- glass edge -->
+  <rect x="0.5" y="0.5" width="411" height="25" rx="12.5" fill="none" stroke="#ffffff" stroke-opacity="0.09"/>
+</svg>
