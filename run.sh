@@ -7,7 +7,10 @@ APP_CONTENTS="$ROOT/CodexUsageFloat.app/Contents"
 APP_BIN="$ROOT/CodexUsageFloat.app/Contents/MacOS/CodexUsageFloat"
 APP_RESOURCES="$ROOT/CodexUsageFloat.app/Contents/Resources"
 
-swiftc -framework Cocoa -framework UserNotifications "$ROOT/CodexUsageFloat.swift" -o "$BIN"
+swiftc -framework Cocoa -framework UserNotifications -framework ApplicationServices \
+  "$ROOT/UsageModels.swift" "$ROOT/FollowOverlayController.swift" \
+  "$ROOT/CodexWindowTracker.swift" "$ROOT/FollowOverlayWindow.swift" \
+  "$ROOT/FollowAccessibilityHelp.swift" "$ROOT/CodexUsageFloat.swift" -o "$BIN"
 mkdir -p "$ROOT/CodexUsageFloat.app/Contents/MacOS"
 mkdir -p "$APP_RESOURCES"
 cp "$BIN" "$APP_BIN"
@@ -21,4 +24,6 @@ cp "$ROOT/Resources/openai-codex-seeklogo.svg" "$APP_RESOURCES/openai-codex-seek
 # the app on launch ("cs_invalid_page"). Re-sign the bundle after every build.
 codesign --force --sign - "$ROOT/CodexUsageFloat.app"
 
-open -n "$ROOT/CodexUsageFloat.app"
+if [[ "${1:-}" != "--build-only" ]]; then
+  open -n "$ROOT/CodexUsageFloat.app"
+fi
