@@ -1,30 +1,7 @@
 import Cocoa
 import QuartzCore
 import UserNotifications
-
-struct LimitWindow {
-    let title: String
-    let usedPercent: Int
-    let windowDurationMins: Int?
-    let resetsAt: Int64?
-
-    var remainingPercent: Int {
-        max(0, min(100, 100 - usedPercent))
-    }
-}
-
-struct UsageSnapshot {
-    let fiveHour: LimitWindow?
-    let weekly: LimitWindow?
-    let resetCredits: Int?
-    let planType: String?
-    let updatedAt: Date
-    let status: String
-
-    var hasUsageData: Bool {
-        fiveHour != nil || weekly != nil
-    }
-}
+import ApplicationServices
 
 private extension NSColor {
     convenience init(hex: UInt32, alpha: CGFloat = 1) {
@@ -48,18 +25,7 @@ private extension NSColor {
 /// Every tier shares the same glass body, gloss and colour grammar.
 /// The drag handle at the fill end stays invisible; there is no bead or marker drawn there.
 final class FlowProgressView: NSView {
-    private enum Mood {
-        case meadow, water, sunset, danger
-
-        static func forPercent(_ percent: Int) -> Mood {
-            switch percent {
-            case 70...: return .meadow
-            case 40..<70: return .water
-            case 10..<40: return .sunset
-            default: return .danger
-            }
-        }
-    }
+    private typealias Mood = RemainingQuotaTier
 
     private struct Skin {
         let top: NSColor
@@ -1382,6 +1348,13 @@ final class CodexUsageClient {
             let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return }
 
+        if object["error"] != nil || (object["result"] != nil && !(object["result"] is [String: Any])) {
+            rateLimitReadPending = false
+            rateLimitReadStartedAt = nil
+            publishError("Cannot read Codex usage limits")
+            return
+        }
+
         if let result = object["result"] as? [String: Any] {
             if result["userAgent"] != nil {
                 initialized = true
@@ -1400,6 +1373,8 @@ final class CodexUsageClient {
                 DispatchQueue.main.async {
                     self.onSnapshot(snapshot)
                 }
+            } else {
+                publishError("Codex usage limits are unavailable")
             }
             return
         }
@@ -1591,6 +1566,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var timer: Timer?
     private var statusItem: NSStatusItem!
     private var latestSnapshot: UsageSnapshot?
+    private var followController: FollowOverlayController?
+    private var permissionHelp: FollowAccessibilityHelp!
+    private var accessibilityGranted = AXIsProcessTrusted()
+    private var hasHadAccessibilityPermission = false
     private var notificationPermissionGranted = false
     private let statusIcon: NSImage? = {
         let candidates: [URL?] = [
@@ -1611,9 +1590,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        let windowSize = CGSize(width: windowWidth, height: fullWindowHeight)
-        usageView = UsageView(frame: CGRect(origin: .zero, size: windowSize))
-        usageView.autoresizingMask = [.width, .height]
+        hasHadAccessibilityPermission = accessibilityGranted
+        let helpHeight = accessibilityGranted ? 0 : FollowAccessibilityHelp.height
+        let windowSize = CGSize(width: windowWidth, height: fullWindowHeight + helpHeight)
+        usageView = UsageView(frame: CGRect(x: 0, y: helpHeight, width: windowWidth, height: fullWindowHeight))
         usageView.requestHide = { [weak self] in
             self?.hideWindow()
         }
@@ -1625,6 +1605,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.autoresizingMask = [.width, .height]
         container.wantsLayer = true
         container.addSubview(usageView)
+        permissionHelp = FollowAccessibilityHelp()
+        permissionHelp.frame = CGRect(x: 0, y: 0, width: windowWidth, height: FollowAccessibilityHelp.height)
+        permissionHelp.isHidden = accessibilityGranted
+        container.addSubview(permissionHelp)
 
         window = NSWindow(
             contentRect: CGRect(origin: .zero, size: windowSize),
@@ -1654,6 +1638,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        let followController = FollowOverlayController(tracker: CodexWindowTracker(), presenter: FollowOverlayWindow())
+        followController.onPermissionChange = { [weak self] granted in
+            self?.updateAccessibilityPermission(granted)
+        }
+        self.followController = followController
+        followController.start()
+
         client = CodexUsageClient { [weak self] snapshot in
             let previousSnapshot = self?.latestSnapshot
             self?.usageView.snapshot = snapshot
@@ -1661,6 +1652,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.latestSnapshot = snapshot
             self?.updateStatusItem(snapshot)
             self?.resizeWindow(for: snapshot)
+            self?.followController?.updateSnapshot(snapshot)
         }
         client.start()
 
@@ -1670,6 +1662,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        followController?.stop()
         timer?.invalidate()
         client?.stop()
         NotificationCenter.default.removeObserver(self)
@@ -1863,8 +1856,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func resizeWindow(for snapshot: UsageSnapshot) {
-        guard snapshot.hasUsageData else { return }
-        let targetHeight = snapshot.fiveHour == nil || snapshot.weekly == nil ? compactWindowHeight : fullWindowHeight
+        let baseHeight: CGFloat
+        if snapshot.hasUsageData {
+            baseHeight = snapshot.fiveHour == nil || snapshot.weekly == nil ? compactWindowHeight : fullWindowHeight
+        } else {
+            baseHeight = usageView.frame.height
+        }
+        let helpHeight = accessibilityGranted ? 0 : FollowAccessibilityHelp.height
+        let targetHeight = baseHeight + helpHeight
+        usageView.frame = CGRect(x: 0, y: helpHeight, width: windowWidth, height: baseHeight)
+        permissionHelp.isHidden = accessibilityGranted
         guard abs(window.frame.height - targetHeight) > 0.5 else { return }
 
         var frame = window.frame
@@ -1872,6 +1873,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         frame.size.height = targetHeight
         frame.size.width = windowWidth
         window.setFrame(frame, display: true, animate: false)
+    }
+
+    private func updateAccessibilityPermission(_ granted: Bool) {
+        accessibilityGranted = granted
+        permissionHelp.setRevoked(!granted && hasHadAccessibilityPermission)
+        hasHadAccessibilityPermission = hasHadAccessibilityPermission || granted
+        resizeWindow(for: latestSnapshot ?? usageView.snapshot)
     }
 
     @objc private func toggleWindowFromStatusItem() {
@@ -1884,9 +1892,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func hideWindow() {
         window.orderOut(nil)
+        followController?.setMainWindowHidden(true)
     }
 
     private func showWindow() {
+        followController?.setMainWindowHidden(false)
         positionWindow()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -1909,7 +1919,12 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
     }
 }
 
-let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
+@main
+enum CodexUsageFloatApp {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        withExtendedLifetime(delegate) { app.run() }
+    }
+}
