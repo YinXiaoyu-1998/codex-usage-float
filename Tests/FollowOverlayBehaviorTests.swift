@@ -118,13 +118,13 @@ private func testPermissionRevocationAndRecovery() throws {
 private func testLoadingAndQuotaRows() throws {
     let fixture = Fixture()
     fixture.show()
-    try expect(try fixture.presentation().rows == [FollowOverlayRow(text: "额度连接中…", remainingPercent: nil)], "The first visible frame should clearly indicate loading")
+    try expect(try fixture.presentation().rows == [FollowOverlayRow(text: "Connecting...", remainingPercent: nil)], "The first visible frame should clearly indicate loading in English")
     fixture.controller.updateSnapshot(snapshot(fiveHour: 12, weekly: 60))
     let result = try fixture.presentation()
     try expect(result.rows == [
-        FollowOverlayRow(text: "周剩余 40%", remainingPercent: 40),
-        FollowOverlayRow(text: "5h 剩余 88%", remainingPercent: 88)
-    ], "The overlay must use the same remaining quota values, with weekly first")
+        FollowOverlayRow(text: "Weekly 40% left", remainingPercent: 40),
+        FollowOverlayRow(text: "5H 88% left", remainingPercent: 88)
+    ], "The overlay must use English labels and the same remaining quota values, with weekly first")
 }
 
 private func testSingleQuotaAndTopAnchor() throws {
@@ -134,11 +134,11 @@ private func testSingleQuotaAndTopAnchor() throws {
     let twoRows = try fixture.presentation()
     fixture.controller.updateSnapshot(snapshot(weekly: 60))
     let weeklyOnly = try fixture.presentation()
-    try expect(weeklyOnly.rows == [FollowOverlayRow(text: "周剩余 40%", remainingPercent: 40)], "Missing five-hour data must not become a zero value")
+    try expect(weeklyOnly.rows == [FollowOverlayRow(text: "Weekly 40% left", remainingPercent: 40)], "Missing five-hour data must not become a zero value")
     try expect(weeklyOnly.frame.height < twoRows.frame.height, "A single quota should occupy a single-row overlay")
     try expect(weeklyOnly.frame.maxY == twoRows.frame.maxY, "Changing row count must preserve the top anchor")
     fixture.controller.updateSnapshot(snapshot(fiveHour: 12))
-    try expect(try fixture.presentation().rows == [FollowOverlayRow(text: "5h 剩余 88%", remainingPercent: 88)], "Missing weekly data must leave only the five-hour row")
+    try expect(try fixture.presentation().rows == [FollowOverlayRow(text: "5H 88% left", remainingPercent: 88)], "Missing weekly data must leave only the five-hour row")
 }
 
 private func testFailureClearsStaleQuotaAndRecovers() throws {
@@ -146,11 +146,11 @@ private func testFailureClearsStaleQuotaAndRecovers() throws {
     fixture.show()
     fixture.controller.updateSnapshot(snapshot(fiveHour: 12, weekly: 60))
     fixture.controller.updateSnapshot(snapshot(status: "Connection failed"))
-    try expect(try fixture.presentation().rows == [FollowOverlayRow(text: "额度暂不可用", remainingPercent: nil)], "A read failure must replace previously successful numbers")
+    try expect(try fixture.presentation().rows == [FollowOverlayRow(text: "Usage unavailable", remainingPercent: nil)], "A read failure must replace previously successful numbers")
     fixture.controller.updateSnapshot(snapshot(status: "Connecting..."))
-    try expect(try fixture.presentation().rows == [FollowOverlayRow(text: "额度连接中…", remainingPercent: nil)], "Reconnecting must not restore stale numbers")
+    try expect(try fixture.presentation().rows == [FollowOverlayRow(text: "Connecting...", remainingPercent: nil)], "Reconnecting must not restore stale numbers")
     fixture.controller.updateSnapshot(snapshot(weekly: 55))
-    try expect(try fixture.presentation().rows == [FollowOverlayRow(text: "周剩余 45%", remainingPercent: 45)], "A successful retry must restore fresh quota values")
+    try expect(try fixture.presentation().rows == [FollowOverlayRow(text: "Weekly 45% left", remainingPercent: 45)], "A successful retry must restore fresh quota values")
     fixture.controller.updateSnapshot(snapshot(status: "No usage data"))
     try expect(try fixture.presentation().rows.first?.remainingPercent == nil, "An empty result must not retain a previous quota")
 }
