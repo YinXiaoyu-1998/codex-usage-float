@@ -7,7 +7,13 @@ APP_CONTENTS="$ROOT/CodexUsageFloat.app/Contents"
 APP_BIN="$ROOT/CodexUsageFloat.app/Contents/MacOS/CodexUsageFloat"
 APP_RESOURCES="$ROOT/CodexUsageFloat.app/Contents/Resources"
 
-swiftc -framework Cocoa -framework UserNotifications -framework ApplicationServices \
+# Pin the deployment target: newer toolchains default to the SDK's macOS version
+# (e.g. macosx28.0), and LaunchServices refuses to `open` an app whose Mach-O
+# minimum OS is newer than the running system. Match Info.plist's 13.0.
+DEPLOYMENT_TARGET="$(uname -m)-apple-macos13.0"
+
+swiftc -target "$DEPLOYMENT_TARGET" \
+  -framework Cocoa -framework UserNotifications -framework ApplicationServices \
   "$ROOT/UsageModels.swift" "$ROOT/RestartPolicy.swift" "$ROOT/FollowOverlayController.swift" \
   "$ROOT/CodexWindowTracker.swift" "$ROOT/FollowOverlayWindow.swift" \
   "$ROOT/FollowAccessibilityHelp.swift" "$ROOT/CodexUsageFloat.swift" -o "$BIN"
