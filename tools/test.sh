@@ -15,3 +15,10 @@ swiftc \
   "$FOLLOW_TEST_ROOT/Tests/FollowOverlayBehaviorTests.swift" \
   -o "$FOLLOW_TEST_BUILD/FollowOverlayBehaviorTests"
 "$FOLLOW_TEST_BUILD/FollowOverlayBehaviorTests"
+
+# Relaunch budgeting is pure logic; it runs without AppKit or a real child process.
+swiftc \
+  "$FOLLOW_TEST_ROOT/RestartPolicy.swift" \
+  "$FOLLOW_TEST_ROOT/Tests/RestartPolicyTests.swift" \
+  -o "$FOLLOW_TEST_BUILD/RestartPolicyTests"
+"$FOLLOW_TEST_BUILD/RestartPolicyTests"

@@ -16,6 +16,28 @@ final class CodexWindowTracker: FollowOverlayTracking {
     private var windowElement: AXUIElement?
     private var windowIdentity = FollowWindowIdentityResolver()
 
+    /// Sampling cadence. `active` follows a moving window smoothly; `idle` is a
+    /// bounded probe used while the tracked window stays still, so a permanently
+    /// visible overlay cannot keep a full 30 Hz loop running all day.
+    private let activeSamplingInterval: TimeInterval = 1.0 / 30
+    private let idleSamplingInterval: TimeInterval = 1.0 / 8
+    private let idleSamplesBeforeBackingOff = 60
+    private var currentSamplingInterval: TimeInterval?
+    private var idleSamples = 0
+    private var lastPublishedFrame: CGRect?
+
+    /// Budgets for the two costly window-server lookups. AX geometry is read on
+    /// every sample because it is what moves the overlay; confirming that the
+    /// resolved window still exists is limited to twice a second, and the full
+    /// on-screen window enumeration needed to resolve a new identity to once a
+    /// second. Both ceilings are what stop recovery polling from becoming the
+    /// busy loop it is meant to recover from.
+    private let presenceCheckInterval: TimeInterval = 0.5
+    private let identityResolveInterval: TimeInterval = 1
+    private var lastPresenceCheck = Date.distantPast
+    private var windowIsPresent = false
+    private var lastIdentityResolve = Date.distantPast
+
     private let applicationNotifications = [
         kAXFocusedWindowChangedNotification, kAXWindowCreatedNotification,
         kAXApplicationHiddenNotification, kAXApplicationShownNotification
@@ -63,10 +85,35 @@ final class CodexWindowTracker: FollowOverlayTracking {
     func setContinuousTracking(_ enabled: Bool) {
         if enabled && running {
             guard positionTimer == nil else { return }
-            positionTimer = makeTimer(interval: 1.0 / 30) { [weak self] in self?.refresh() }
+            installSamplingTimer(activeSamplingInterval)
         } else {
             positionTimer?.invalidate()
             positionTimer = nil
+            currentSamplingInterval = nil
+            idleSamples = 0
+        }
+    }
+
+    private func installSamplingTimer(_ interval: TimeInterval) {
+        positionTimer?.invalidate()
+        currentSamplingInterval = interval
+        positionTimer = makeTimer(interval: interval) { [weak self] in self?.refresh() }
+    }
+
+    private func noteSampledFrame(_ frame: CGRect?) {
+        guard positionTimer != nil else { return }
+        if frame == lastPublishedFrame {
+            idleSamples += 1
+            if idleSamples == idleSamplesBeforeBackingOff,
+               currentSamplingInterval == activeSamplingInterval {
+                installSamplingTimer(idleSamplingInterval)
+            }
+        } else {
+            idleSamples = 0
+            lastPublishedFrame = frame
+            if currentSamplingInterval == idleSamplingInterval {
+                installSamplingTimer(activeSamplingInterval)
+            }
         }
     }
 
@@ -82,13 +129,8 @@ final class CodexWindowTracker: FollowOverlayTracking {
             if let applicationElement,
                let focused = copyElement(applicationElement, attribute: kAXFocusedWindowAttribute) {
                 bindWindow(focused)
-                var minimized: CFTypeRef?
-                let result = AXUIElementCopyAttributeValue(focused, kAXMinimizedAttribute as CFString, &minimized)
-                if result == .success, let isMinimized = minimized as? Bool, !isMinimized,
-                   let origin = point(focused), let size = size(focused),
-                   size.width > 0, size.height > 0,
-                   isOnActiveSpace(frame: CGRect(origin: origin, size: size), pid: target.processIdentifier) {
-                    frame = CGRect(origin: origin, size: size)
+                if let candidate = visibleFrame(of: focused) {
+                    frame = confirmedFrame(candidate, pid: target.processIdentifier)
                 }
             } else {
                 unbindWindow()
@@ -96,7 +138,81 @@ final class CodexWindowTracker: FollowOverlayTracking {
         } else {
             unbindApplication()
         }
+        noteSampledFrame(frame)
         onChange?(FollowEnvironment(accessibilityGranted: trusted, focusedWindowFrame: frame, desktopTop: desktopTop))
+    }
+
+    /// Geometry of a focused window that can host the overlay, or nil when it is
+    /// minimized, degenerate or not yet on screen.
+    private func visibleFrame(of focused: AXUIElement) -> CGRect? {
+        var minimized: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(focused, kAXMinimizedAttribute as CFString, &minimized)
+        guard result == .success, let isMinimized = minimized as? Bool, !isMinimized else { return nil }
+        guard let origin = point(focused), let size = size(focused),
+              size.width > 0, size.height > 0,
+              origin.x.isFinite, origin.y.isFinite, size.width.isFinite, size.height.isFinite
+        else { return nil }
+        return CGRect(origin: origin, size: size)
+    }
+
+    /// Resolves the AX geometry to a window-server identity, spending as little
+    /// as possible: a cached identity is confirmed with a single-window lookup,
+    /// and the full window list is only enumerated to find a new identity.
+    private func confirmedFrame(_ candidate: CGRect, pid: pid_t) -> CGRect? {
+        let now = Date()
+        if let tracked = windowIdentity.trackedWindowID {
+            if now.timeIntervalSince(lastPresenceCheck) >= presenceCheckInterval {
+                lastPresenceCheck = now
+                windowIsPresent = windowIsOnScreen(tracked, pid: pid)
+                if !windowIsPresent {
+                    // The cached id is gone. Resolve again on this sample instead of
+                    // leaving the overlay hidden until the next budgeted attempt;
+                    // repeated failures stay limited by `identityResolveInterval`.
+                    windowIdentity.reset()
+                    lastIdentityResolve = .distantPast
+                }
+            }
+            if windowIdentity.trackedWindowID != nil, windowIsPresent { return candidate }
+        }
+        guard now.timeIntervalSince(lastIdentityResolve) >= identityResolveInterval else { return nil }
+        lastIdentityResolve = now
+        guard resolveIdentity(candidate, pid: pid) else { return nil }
+        windowIsPresent = true
+        return candidate
+    }
+
+    /// Full enumeration, bounded by `identityResolveInterval`.
+    private func resolveIdentity(_ focusedFrame: CGRect, pid: pid_t) -> Bool {
+        guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]] else { return false }
+        let candidates = windowCandidates(windows, pid: pid)
+        return windowIdentity.isVisible(focusedFrame: focusedFrame, windows: candidates)
+    }
+
+    /// Single-window lookup, used to confirm a cached identity cheaply. The window
+    /// must still be on screen, so a Codex window on an inactive Space never pulls
+    /// the all-Spaces overlay onto an empty desktop.
+    private func windowIsOnScreen(_ id: CGWindowID, pid: pid_t) -> Bool {
+        guard let info = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]],
+              let window = info.first else { return false }
+        guard (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
+              (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0
+        else { return false }
+        return (window[kCGWindowIsOnscreen as String] as? Bool) ?? true
+    }
+
+    private func windowCandidates(_ windows: [[String: Any]], pid: pid_t) -> [FollowWindowCandidate] {
+        windows.compactMap { window in
+            guard
+                (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
+                (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                let bounds = window[kCGWindowBounds as String] as? [String: Any],
+                let number = window[kCGWindowNumber as String] as? NSNumber
+            else { return nil }
+            var candidate = CGRect.zero
+            guard CGRectMakeWithDictionaryRepresentation(bounds as CFDictionary, &candidate) else { return nil }
+            return FollowWindowCandidate(id: number.uint32Value, frame: candidate)
+        }
     }
 
     private func makeTimer(interval: TimeInterval, action: @escaping () -> Void) -> Timer {
@@ -142,7 +258,16 @@ final class CodexWindowTracker: FollowOverlayTracking {
             }
         }
         windowElement = nil
+        resetIdentityState()
+    }
+
+    /// Drops cached identity and its budgets so the next bind resolves from scratch.
+    private func resetIdentityState() {
         windowIdentity.reset()
+        windowIsPresent = false
+        lastPresenceCheck = .distantPast
+        lastIdentityResolve = .distantPast
+        lastPublishedFrame = nil
     }
 
     private func unbindApplication() {
@@ -164,26 +289,6 @@ final class CodexWindowTracker: FollowOverlayTracking {
         guard let observer else { return }
         // Unsupported events are covered by bounded visible sampling / recovery.
         AXObserverAddNotification(observer, element, name as CFString, Unmanaged.passUnretained(self).toOpaque())
-    }
-
-    private func isOnActiveSpace(frame: CGRect, pid: pid_t) -> Bool {
-        // An app may stay frontmost while its AX focused window belongs to an
-        // inactive Space. Window-server metadata prevents the all-Spaces panel
-        // from appearing on that empty desktop. No pixels or window titles read.
-        guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
-                as? [[String: Any]] else { return false }
-        let candidates = windows.filter {
-            ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid &&
-            ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0
-        }
-        let visibleWindows: [FollowWindowCandidate] = candidates.compactMap { window in
-            guard let bounds = window[kCGWindowBounds as String] as? [String: Any],
-                  let number = window[kCGWindowNumber as String] as? NSNumber else { return nil }
-            var candidate = CGRect.zero
-            guard CGRectMakeWithDictionaryRepresentation(bounds as CFDictionary, &candidate) else { return nil }
-            return FollowWindowCandidate(id: number.uint32Value, frame: candidate)
-        }
-        return windowIdentity.isVisible(focusedFrame: frame, windows: visibleWindows)
     }
 
     private func copyElement(_ source: AXUIElement, attribute: String) -> AXUIElement? {
@@ -222,6 +327,9 @@ struct FollowWindowCandidate {
 /// Resolve AX geometry to window-server identity without reading window titles.
 struct FollowWindowIdentityResolver {
     private var windowID: CGWindowID?
+
+    /// Identity currently tracked, if a window-server window has been resolved.
+    var trackedWindowID: CGWindowID? { windowID }
 
     mutating func reset() { windowID = nil }
 
