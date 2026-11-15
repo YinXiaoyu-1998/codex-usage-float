@@ -1194,14 +1194,21 @@ final class UsageView: NSView {
 }
 
 final class CodexUsageClient {
+    /// A single JSON-RPC response is a few hundred bytes; anything near this cap
+    /// means the child is misbehaving, so the buffer is dropped instead of grown.
+    private static let maxBufferedBytes = 1 << 20
+
     private let onSnapshot: (UsageSnapshot) -> Void
     private var process: Process?
     private var stdinHandle: FileHandle?
+    private var stdoutHandle: FileHandle?
+    private var stderrHandle: FileHandle?
     private var stdoutBuffer = Data()
     private var nextId = 1
     private var initialized = false
     private var startedAt: Date?
-    private var restartPending = false
+    private var restartPolicy = RestartPolicy()
+    private var restartWorkItem: DispatchWorkItem?
     private var rateLimitReadPending = false
     private var rateLimitReadStartedAt: Date?
     private var lastSnapshot: UsageSnapshot?
@@ -1211,7 +1218,7 @@ final class CodexUsageClient {
     }
 
     func start() {
-        guard process == nil else { return }
+        guard process == nil, restartWorkItem == nil else { return }
 
         let process = Process()
         configureCodexProcess(process)
@@ -1223,14 +1230,30 @@ final class CodexUsageClient {
         process.standardOutput = output
         process.standardError = error
         self.stdinHandle = input.fileHandleForWriting
+        self.stdoutHandle = output.fileHandleForReading
+        self.stderrHandle = error.fileHandleForReading
         self.process = process
         self.initialized = false
         self.startedAt = Date()
+        self.stdoutBuffer.removeAll(keepingCapacity: true)
 
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            self?.consume(handle.availableData)
+            let data = handle.availableData
+            guard !data.isEmpty else {
+                // EOF leaves a file-handle source permanently readable. Keeping the
+                // handler attached would spin this dispatch queue at full speed for
+                // as long as the closed pipe lives, so detach it first and let the
+                // shared exit path decide whether a relaunch is due.
+                handle.readabilityHandler = nil
+                DispatchQueue.main.async { self?.handleExit() }
+                return
+            }
+            self?.consume(data)
         }
-        error.fileHandleForReading.readabilityHandler = { _ in }
+        error.fileHandleForReading.readabilityHandler = { handle in
+            // stderr is diagnostic only; drain it so the child never blocks.
+            if handle.availableData.isEmpty { handle.readabilityHandler = nil }
+        }
         process.terminationHandler = { [weak self] _ in
             DispatchQueue.main.async {
                 self?.handleExit()
@@ -1242,6 +1265,7 @@ final class CodexUsageClient {
             initialize()
         } catch {
             publishError("Cannot start codex app-server")
+            teardownProcess()
             scheduleRestart()
         }
     }
@@ -1268,18 +1292,17 @@ final class CodexUsageClient {
     }
 
     func stop() {
-        process?.terminate()
-        process = nil
-        stdinHandle = nil
-        initialized = false
-        startedAt = nil
-        rateLimitReadPending = false
-        rateLimitReadStartedAt = nil
+        // A queued relaunch would otherwise wake a client the app already closed.
+        restartWorkItem?.cancel()
+        restartWorkItem = nil
+        restartPolicy = RestartPolicy()
+        teardownProcess()
     }
 
     func poll() {
         if process == nil {
-            start()
+            // While a bounded relaunch is queued, polling must not bypass its delay.
+            if restartWorkItem == nil { start() }
             return
         }
         if initializeTimedOut {
@@ -1335,6 +1358,12 @@ final class CodexUsageClient {
         guard !data.isEmpty else { return }
         stdoutBuffer.append(data)
 
+        if stdoutBuffer.count > Self.maxBufferedBytes {
+            stdoutBuffer.removeAll(keepingCapacity: true)
+            publishError("Codex sent an oversized response")
+            return
+        }
+
         while let newline = stdoutBuffer.firstIndex(of: 10) {
             let lineData = stdoutBuffer.subdata(in: 0..<newline)
             stdoutBuffer.removeSubrange(0...newline)
@@ -1359,6 +1388,8 @@ final class CodexUsageClient {
             if result["userAgent"] != nil {
                 initialized = true
                 startedAt = nil
+                // The handshake worked, so the relaunch budget starts over.
+                restartPolicy.recordSuccess()
                 requestRateLimits()
                 return
             }
@@ -1522,36 +1553,53 @@ final class CodexUsageClient {
     }
 
     private func handleExit() {
-        process = nil
-        stdinHandle = nil
-        initialized = false
-        startedAt = nil
-        rateLimitReadPending = false
-        rateLimitReadStartedAt = nil
+        // The child exit callback and stdout EOF report the same event; only the
+        // first report may tear down and queue a relaunch.
+        guard process != nil else { return }
+        teardownProcess()
         publishError("Disconnected. Reconnecting...")
         scheduleRestart()
     }
 
     private func restartAppServer(reason: String) {
-        rateLimitReadPending = false
-        rateLimitReadStartedAt = nil
-        initialized = false
-        startedAt = nil
         publishError(reason)
-        process?.terminationHandler = nil
-        process?.terminate()
-        process = nil
-        stdinHandle = nil
+        teardownProcess()
         scheduleRestart()
     }
 
+    /// Releases the child and every handle that could keep waking this client.
+    private func teardownProcess() {
+        stdoutHandle?.readabilityHandler = nil
+        stderrHandle?.readabilityHandler = nil
+        stdoutHandle = nil
+        stderrHandle = nil
+        stdoutBuffer.removeAll(keepingCapacity: false)
+        process?.terminationHandler = nil
+        if process?.isRunning == true { process?.terminate() }
+        process = nil
+        stdinHandle = nil
+        initialized = false
+        startedAt = nil
+        rateLimitReadPending = false
+        rateLimitReadStartedAt = nil
+    }
+
+    /// Queues exactly one relaunch, with a ceiling: fast retries back off to
+    /// `RestartPolicy.maxDelay`, then a slow sustained probe keeps trying without
+    /// ever turning a broken Codex install into a busy loop.
     private func scheduleRestart() {
-        guard !restartPending else { return }
-        restartPending = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            self.restartPending = false
+        guard restartWorkItem == nil else { return }
+        let delay = restartPolicy.nextDelay()
+        if restartPolicy.isSustained {
+            publishError("Codex unavailable. Retrying every \(Int(delay / 60)) minutes...")
+        }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.restartWorkItem = nil
             self.start()
         }
+        restartWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
 }
 

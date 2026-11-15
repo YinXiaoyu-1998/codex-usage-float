@@ -8,7 +8,7 @@ APP_BIN="$ROOT/CodexUsageFloat.app/Contents/MacOS/CodexUsageFloat"
 APP_RESOURCES="$ROOT/CodexUsageFloat.app/Contents/Resources"
 
 swiftc -framework Cocoa -framework UserNotifications -framework ApplicationServices \
-  "$ROOT/UsageModels.swift" "$ROOT/FollowOverlayController.swift" \
+  "$ROOT/UsageModels.swift" "$ROOT/RestartPolicy.swift" "$ROOT/FollowOverlayController.swift" \
   "$ROOT/CodexWindowTracker.swift" "$ROOT/FollowOverlayWindow.swift" \
   "$ROOT/FollowAccessibilityHelp.swift" "$ROOT/CodexUsageFloat.swift" -o "$BIN"
 mkdir -p "$ROOT/CodexUsageFloat.app/Contents/MacOS"
