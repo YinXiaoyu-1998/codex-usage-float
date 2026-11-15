@@ -16,7 +16,8 @@ It reads usage information from the local Codex app server and shows:
 
 ## Requirements
 
-- macOS 13 or later
+- macOS 13 or later; the build targets macOS 13.0 by default and
+  `CUF_DEPLOYMENT_TARGET=<arch>-apple-macos<version>` lowers or raises it
 - Swift toolchain from Xcode Command Line Tools
 - ChatGPT/Codex installed and signed in locally
 - `codex app-server --stdio` available either from the ChatGPT app bundle or on `PATH`
@@ -33,6 +34,8 @@ This is an unofficial local utility. It uses the local Codex app-server interfac
 The script compiles the Swift sources, builds `CodexUsageFloat.app`, copies bundled resources, and opens the app.
 
 Use `./run.sh --build-only` to build without launching. Run `./tools/test.sh` for the follow-overlay controller's behavior tests; these do not start the app or request system permissions.
+
+`run.sh` pins the Swift deployment target to the macOS version declared in `Info.plist` and fails the build when the resulting binary requires a newer macOS than this Mac. A binary built for a newer system still runs when executed directly, but LaunchServices then refuses to open it with `error -10825`, so that check is what keeps the built app clickable. Installing, cleaning up old copies and repairing Accessibility permission are covered by the [reinstall skill](docs/agents/reinstall-after-update.md).
 
 ## Start On Login
 
@@ -105,6 +108,7 @@ FollowOverlayWindow.swift   Passive AppKit overlay
 FollowAccessibilityHelp.swift  Main-window permission guidance
 Tests/                     Controller behavior tests
 docs/follow-overlay-validation.md  Real-machine QA and results
+docs/agents/reinstall-after-update.md  Install/upgrade skill: build, compatibility, cleanup, permission
 Info.plist                  App bundle metadata
 Resources/                  Icons and logo assets copied into the app bundle
 design/progress-bar/        SVG motion prototypes and a browser preview of the four tiers

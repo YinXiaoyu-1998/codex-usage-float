@@ -16,7 +16,8 @@
 
 ## 环境要求
 
-- macOS 13 或更新版本
+- macOS 13 或更新版本；构建默认把最低系统版本钉在 13.0，可用
+  `CUF_DEPLOYMENT_TARGET=<arch>-apple-macos<版本>` 调低或调高
 - Xcode Command Line Tools 提供的 Swift 工具链
 - 本机已安装并登录 ChatGPT/Codex
 - 可以从 ChatGPT app bundle 或 `PATH` 调用 `codex app-server --stdio`
@@ -33,6 +34,8 @@
 使用 `./run.sh --build-only` 只构建、不启动。运行 `./tools/test.sh` 可执行浮层控制器行为测试；测试不会启动应用或请求系统权限。
 
 脚本会编译 Swift 源码，生成 `CodexUsageFloat.app`，复制资源文件，并打开 app。
+
+构建脚本会把 Swift 部署目标钉在 `Info.plist` 声明的 macOS 版本上，并在产物要求的最低系统高于本机时直接失败。这种产物虽然能直接执行，但 `open` 会被 LaunchServices 拒绝（`error -10825`），所以这一步检查保证构建出来的 app 能双击打开。安装、旧副本清理和辅助功能授权修复见[更新后重安装 skill](docs/agents/reinstall-after-update.md)。
 
 ## 开机自启
 
@@ -105,6 +108,7 @@ FollowOverlayWindow.swift  被动 AppKit 浮层
 FollowAccessibilityHelp.swift  主窗口授权说明
 Tests/                   控制器行为测试
 docs/follow-overlay-validation.md  实机验收记录
+docs/agents/reinstall-after-update.md  安装/升级 skill：构建兼容性、清理、授权与验收
 Info.plist               app bundle 元数据
 Resources/               打包进 app bundle 的图标和 logo 资源
 design/progress-bar/     四档动效的 SVG 设计稿与浏览器预览页
